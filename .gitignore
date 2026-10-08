@@ -1,0 +1,6 @@
+# Built and copied app bundles, build output, and the app's own frontend code
+eyeREST.app/
+eyeREST.app.orig/
+frontend/
+libfsaux.dylib
+.DS_Store
