@@ -14,7 +14,8 @@
 // 4. Usage statistics: a "Statistics" button in the footer opens two
 //    GitHub-style yearly grids, one square per day: the share of screen-on
 //    time with monitoring running, and smiles per hour of monitoring with a
-//    face in view. Screen-on time comes from the macOS power log (fsaux.m).
+//    face in view, not counting time and smiles while looking down. Screen-on
+//    time comes from the macOS power log (fsaux.m).
 // 5. "Run at startup" checkbox under the start/stop button. The window starts
 //    hidden (fsaux.m) unless the camera permission or intro is still pending.
 (() => {
@@ -272,6 +273,33 @@
     return stats.days[k] || (stats.days[k] = { track: 0, face: 0, smiles: 0, screen: 0 });
   };
 
+  // Looking down (writing, reading notes) makes the eyelids look half closed to
+  // the face model, so the app misses blinks and shows smiles. Such time and
+  // smiles are left out of the smile rate. The app passes MediaPipe's
+  // blendshapes (52 categories, '_neutral' first) through Array#filter/#find
+  // to pick the eyeBlink scores; that is where the scores are read.
+  const LOOK_DOWN = 0.4;       // eyeLookDownLeft/Right average from here on = looking down (screen: ~0.1)
+  const LOOK_DOWN_HOLD = 4000; // a smile up to this long after looking down is not counted
+  let downSamples = 0, upSamples = 0, lastDownAt = 0;
+  let gazeSum = 0, blinkSum = 0;  // per tick, for the log
+  function onBlendshapes(cats) {
+    let down = 0, blink = 0;
+    for (const c of cats) {
+      if (c.categoryName === 'eyeLookDownLeft' || c.categoryName === 'eyeLookDownRight') down += c.score / 2;
+      else if (c.categoryName === 'eyeBlinkLeft' || c.categoryName === 'eyeBlinkRight') blink += c.score / 2;
+    }
+    gazeSum += down; blinkSum += blink;
+    if (down >= LOOK_DOWN) { downSamples++; lastDownAt = Date.now(); } else upSamples++;
+  }
+  const isBlendshapes = (a) => a.length > 40 && a[0] && a[0].categoryName === '_neutral';
+  for (const name of ['filter', 'find']) {
+    const orig = Array.prototype[name];
+    Array.prototype[name] = function () {
+      if (isBlendshapes(this)) onBlendshapes(this);
+      return orig.apply(this, arguments);
+    };
+  }
+
   let screenOn = true;
   let lastTick = Date.now();
   workerInterval(() => {
@@ -279,10 +307,15 @@
     // Timers stop while the Mac sleeps; never count more than one missed tick.
     const dt = Math.min(now - lastTick, 2 * TICK_MS) / 1000;
     lastTick = now;
+    const samples = downSamples + upSamples;
+    const upShare = samples ? upSamples / samples : 1;
+    if (samples) log('gaze: down ' + (gazeSum / samples).toFixed(2) + ' blink ' + (blinkSum / samples).toFixed(2) + ' looking down ' + Math.round(100 * (1 - upShare)) + '%');
+    downSamples = upSamples = 0; gazeSum = blinkSum = 0;
     if (!screenOn || !running()) return;
     const d = today();
     d.track += dt;
-    if (!noFace()) d.face += dt;
+    // Face time counts only the part spent not looking down.
+    if (!noFace()) d.face += dt * upShare;
     saveStats();
   }, TICK_MS);
 
@@ -293,6 +326,7 @@
   let recentSmiles = [];
   window.__fsaux.smileShown = () => {
     if (showing || !running() || noFace()) return;
+    if (Date.now() - lastDownAt < LOOK_DOWN_HOLD) { log('smile while looking down: not counted'); return; }
     today().smiles++;
     recentSmiles.push(Date.now());
     saveStats();
