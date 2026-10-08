@@ -17,7 +17,7 @@ Patches the Mac App Store build of **eyeREST** (`com.vinlemon.eyeREST`, tested w
 
 10. **Usage statistics.** A **Statistik** (Statistics) link in the window's footer opens two GitHub-style grids covering the past year, one square per day. Hovering a square shows that day's value:
     - **Monitoring time:** the share of the day's screen-on time with monitoring running, e.g. "63 % (4 h 12 min of 6 h 40 min)". Screen-on time comes from the macOS power log (`pmset -g log`), so time when eyeREST wasn't running counts too.
-    - **Smiles per hour:** blink smiles per hour of monitoring with a face in view, e.g. "42.0/h (126 smiles in 3 h 00 min)". The no-face smile isn't counted. Fewer smiles means you blink more often.
+    - **Smiles per hour:** blink smiles per hour of monitoring with a face in view, e.g. "42.0/h (126 smiles in 3 h 00 min)". The no-face smile isn't counted, and neither is a smile from the 5 seconds before your face was lost, because the app shows that one while it's still waiting for a blink. Fewer smiles means you blink more often.
 
     Below each grid are the averages for the last 7 days and the 7 days before. Recording starts when the patched app first runs, and earlier days show as "no data".
 

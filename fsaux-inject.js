@@ -184,7 +184,7 @@
   workerInterval(() => {
     const want = noFace() && popupEnabled();
     if (want) {
-      if (!showing) log('no face -> showing smile');
+      if (!showing) { log('no face -> showing smile'); window.__fsaux.faceLost(); }
       showing = true;
       invoke('show_blink_popup');
     } else if (showing) {
@@ -286,10 +286,25 @@
     saveStats();
   }, TICK_MS);
 
+  // The app shows its own smile ~3 s after the face goes away (no blinks),
+  // before the no-face state is noticed (2 s debounce + polling). Smiles from
+  // just before a face loss are taken back.
+  const UNDO_MS = 5000;
+  let recentSmiles = [];
   window.__fsaux.smileShown = () => {
     if (showing || !running() || noFace()) return;
     today().smiles++;
+    recentSmiles.push(Date.now());
     saveStats();
+  };
+  window.__fsaux.faceLost = () => {
+    const undo = recentSmiles.filter((ts) => Date.now() - ts < UNDO_MS).length;
+    recentSmiles = [];
+    if (!undo) return;
+    const d = today();
+    d.smiles = Math.max(0, d.smiles - undo);
+    saveStats();
+    log('face lost: ' + undo + ' smile(s) not counted');
   };
   window.__fsaux.screenOn = (on) => { screenOn = on; lastTick = Date.now(); };
   window.__fsaux.screenTime = ({ first, days }) => {
