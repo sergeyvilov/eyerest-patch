@@ -2,8 +2,8 @@
 //
 // 1. "Auto" camera: adds a virtual first entry to the camera dropdown. While it
 //    is selected, the app uses the first external camera that is connected and
-//    falls back to the built-in one; plugging/unplugging a camera switches the
-//    running stream over. The entry's label shows the camera currently in use.
+//    falls back to the built-in one; plugging/unplugging a camera restarts
+//    monitoring with the new one. The entry's label shows the camera currently in use.
 //    Because it is the first entry, the app also picks it by itself whenever
 //    the previously selected camera is missing.
 // 2. While monitoring is running and no face is detected, the blink smile is
@@ -13,9 +13,9 @@
 //    window.__fsaux.start()/stop().
 // 4. Usage statistics: a "Statistics" button in the footer opens two
 //    GitHub-style yearly grids, one square per day: the share of screen-on
-//    time with monitoring running, and smiles per hour of monitoring with a
-//    face in view, not counting time and smiles while looking down. Screen-on
-//    time comes from the macOS power log (fsaux.m).
+//    time with monitoring running, and spontaneous blinks per minute while
+//    the face is found and not looking down, without blinks right after a
+//    smile. Screen-on time comes from the macOS power log (fsaux.m).
 // 5. "Run at startup" checkbox under the start/stop button. The window starts
 //    hidden (fsaux.m) unless the camera permission or intro is still pending.
 (() => {
@@ -59,9 +59,8 @@
   } catch (e) {}
 
   let cams = [];          // real video inputs [{deviceId,label}]
+  let videoW = 720, videoH = 576;  // size of the camera image (face points are relative to it)
   let current = null;     // deviceId the auto stream is using
-  let autoStream = null;  // MediaStream handed to the app for AUTO_ID
-  const videos = new Set();
 
   async function listCams() {
     let list = (await origEnumerate()).filter((d) => d.kind === 'videoinput');
@@ -101,7 +100,6 @@
     return { ...c, video: { ...c.video, deviceId: { exact: deviceId } } };
   }
 
-  let lastConstraints = null;
   md.getUserMedia = async (c) => {
     // WebKit only grants camera requests while the page is visible; ask the
     // native side to put the hidden window on screen invisibly meanwhile.
@@ -116,47 +114,41 @@
     await listCams();
     const b = best();
     if (!b) throw new DOMException('No camera connected', 'NotFoundError');
-    lastConstraints = c;
     current = b.deviceId;
-    autoStream = await origGetUserMedia(withDevice(c, current));
+    const stream = await origGetUserMedia(withDevice(c, current));
+    const vs = stream.getVideoTracks()[0] && stream.getVideoTracks()[0].getSettings();
+    if (vs && vs.width && vs.height) { videoW = vs.width; videoH = vs.height; }
+    // The camera went away (unplugged, display detached) without a devicechange.
+    for (const t of stream.getVideoTracks()) t.addEventListener('ended', () => scheduleCameraCheck('camera ended'));
     log('auto camera -> ' + b.label);
     refreshLabels();
-    return autoStream;
+    return stream;
   }
 
-  // Remember the app's <video> elements so a swapped stream can be re-attached.
-  const srcDesc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'srcObject');
-  Object.defineProperty(HTMLMediaElement.prototype, 'srcObject', {
-    configurable: true,
-    get() { return srcDesc.get.call(this); },
-    set(v) { if (v) videos.add(this); else videos.delete(this); srcDesc.set.call(this, v); },
-  });
-
-  const streamActive = () => autoStream && autoStream.getVideoTracks().some((t) => !t.fsauxStopped);
-  const origStop = MediaStreamTrack.prototype.stop;
-  MediaStreamTrack.prototype.stop = function () { this.fsauxStopped = true; return origStop.call(this); };
-
-  async function onDeviceChange() {
+  // When a better camera appears or the one in use goes away, monitoring is
+  // stopped and started again, which opens the new camera. (Swapping the track
+  // under the running detector leaves it without frames.) Several devicechange
+  // events in a row, e.g. on wake, are handled once.
+  let checkTimer = null, restarting = false;
+  function scheduleCameraCheck(why) {
+    if (checkTimer) checkTimer.terminate();
+    checkTimer = workerInterval(() => { checkTimer.terminate(); checkTimer = null; checkCamera(why); }, 1500);
+  }
+  async function checkCamera(why) {
     await listCams();
     refreshLabels();
     const b = best();
-    if (!streamActive() || !b || b.deviceId === current) return;
-    log('camera change -> ' + b.label);
-    try {
-      const ghost = document.hidden;
-      if (ghost) post({ cmd: 'ghost', on: true });
-      let fresh;
-      try { fresh = await origGetUserMedia(withDevice(lastConstraints, b.deviceId)); }
-      finally { if (ghost) post({ cmd: 'ghost', on: false }); }
-      for (const t of autoStream.getVideoTracks()) { autoStream.removeTrack(t); origStop.call(t); }
-      for (const t of fresh.getVideoTracks()) autoStream.addTrack(t);
-      current = b.deviceId;
-      for (const v of videos) {
-        if (srcDesc.get.call(v) === autoStream) { srcDesc.set.call(v, null); srcDesc.set.call(v, autoStream); v.play().catch(() => {}); }
-      }
-    } catch (e) { log('camera switch failed: ' + e); }
+    const ended = why === 'camera ended';
+    if (restarting || !running() || !b || (b.deviceId === current && !ended)) return;
+    restarting = true;
+    log(why + ' -> restarting monitoring with ' + b.label);
+    stop();
+    let tries = 0;
+    const retry = workerInterval(() => {
+      if (running() || ++tries > 20 || start()) { retry.terminate(); restarting = false; }
+    }, 1000);
   }
-  md.addEventListener('devicechange', () => workerTimeout(onDeviceChange, 500));
+  md.addEventListener('devicechange', () => scheduleCameraCheck('camera change'));
 
   // The dropdown reads labels only when it mounts; keep the Auto label current.
   function refreshLabels() {
@@ -185,7 +177,7 @@
   workerInterval(() => {
     const want = noFace() && popupEnabled();
     if (want) {
-      if (!showing) { log('no face -> showing smile'); window.__fsaux.faceLost(); }
+      if (!showing) log('no face -> showing smile');
       showing = true;
       invoke('show_blink_popup');
     } else if (showing) {
@@ -259,10 +251,10 @@
   const pad = (n) => String(n).padStart(2, '0');
   const dayKey = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
 
-  // {since: first day recorded, days: {'YYYY-MM-DD': {track, face, smiles, screen}}}
-  // track: seconds monitoring ran with the screen on; face: the part of it with
-  // a face in view; smiles: blink smiles shown (not the no-face smile);
-  // screen: screen-on seconds from the power log.
+  // {since: first day recorded, days: {'YYYY-MM-DD': {track, screen, blinks, blinkSec}}}
+  // track: seconds monitoring ran with the screen on; screen: screen-on seconds
+  // from the power log; blinks: spontaneous blinks counted in blinkSec seconds
+  // of usable face time (see below). Older entries also hold face/smiles.
   function loadStats() {
     try {
       const s = JSON.parse(localStorage.getItem(STATS_KEY));
@@ -271,38 +263,116 @@
     return { since: dayKey(new Date()), days: {} };
   }
   const stats = loadStats();
+  try { localStorage.removeItem('fsaux-stats-debug'); } catch (e) {}  // left over from testing
   const saveStats = () => { try { localStorage.setItem(STATS_KEY, JSON.stringify(stats)); } catch (e) {} };
-  const today = () => {
-    const k = dayKey(new Date());
-    return stats.days[k] || (stats.days[k] = { track: 0, face: 0, smiles: 0, screen: 0 });
-  };
+  const dayEntry = (k) => stats.days[k] || (stats.days[k] = { track: 0, screen: 0 });
+  const today = () => dayEntry(dayKey(new Date()));
 
-  // Looking down (writing, reading notes) makes the eyelids look half closed to
-  // the face model, so the app misses blinks and shows smiles. Such time and
-  // smiles are left out of the smile rate. The app passes MediaPipe's
-  // blendshapes (52 categories, '_neutral' first) through Array#filter/#find
-  // to pick the eyeBlink scores; that is where the scores are read.
-  const LOOK_DOWN = 0.4;       // eyeLookDownLeft/Right average from here on = looking down (screen: ~0.1)
-  const LOOK_DOWN_HOLD = 4000; // a smile up to this long after looking down is not counted
-  let downSamples = 0, upSamples = 0, lastDownAt = 0;
-  let gazeSum = 0, blinkSum = 0;  // per tick, for the log
-  function onBlendshapes(cats) {
-    let down = 0, blink = 0;
-    for (const c of cats) {
-      if (c.categoryName === 'eyeLookDownLeft' || c.categoryName === 'eyeLookDownRight') down += c.score / 2;
-      else if (c.categoryName === 'eyeBlinkLeft' || c.categoryName === 'eyeBlinkRight') blink += c.score / 2;
-    }
-    gazeSum += down; blinkSum += blink;
-    if (down >= LOOK_DOWN) { downSamples++; lastDownAt = Date.now(); } else upSamples++;
+  // Spontaneous blinks and looking down, from MediaPipe's 478 face points
+  // (468 face + 10 iris), which the app's face model builds every processed
+  // frame (~13/s) by pushing them one by one into an array; the array is
+  // picked up when the last point arrives.
+  //
+  // Blink: eye aspect ratio (EAR, eyelid gap / eye width) per eye. A blink
+  // is both eyes below BLINK_CLOSED of their usual openness, open again
+  // within BLINK_MAX_MS. Usual openness: slow average over open frames.
+  // Looking down: head pitch (forehead vs chin in 3D) in degrees, relative to
+  // the usual pitch for this camera (30th percentile of the last 5 minutes,
+  // so a camera above the screen doesn't count as "down" and long writing
+  // sessions don't shift it), or the irises clearly low in the eyes.
+  // A frame counts (time and blinks) only while you are not looking down, and
+  // not just after a smile (the first blink after it and any within
+  // SMILE_HOLD are deliberate) or after the face was found again.
+  const BLINK_CLOSED = 0.7, BLINK_OPEN = 0.85, BLINK_MAX_MS = 500;
+  const PITCH_DOWN = 12;        // degrees below the usual head pitch (writing: ~25, keyboard: ~15)
+  const IRIS_DOWN = 0.12;       // iris drop below usual, in eye widths
+  const GAZE_WINDOW = 300;      // seconds of history for the usual pitch/iris
+  const DOWN_HOLD = 1500;       // ms after looking down that still don't count
+  const SMILE_HOLD = 3000;      // ms after a smile appears that don't count
+  const GAP_HOLD = 1000;        // ms after a pause in frames (face just found again)
+  const R_EYE = [33, 160, 158, 133, 153, 144], L_EYE = [362, 385, 387, 263, 373, 380];
+  let lastFrameAt = 0, lastDownAt = 0, lastSmileAt = 0, afterSmile = false, resumeAt = 0;
+  let baseL = 0, baseR = 0, closedSince = 0, blinkAll = 0;
+  let gazeHistory = [], gazeCamera = null, secStart = 0, secPitch = 0, secIris = 0, secN = 0;
+  let usualPitch = null, usualIris = null;
+  let frames = 0, usableFrames = 0, tickPitch = [], tickIris = [], tickEar = [];  // per tick, for the log
+
+  const P = (lm, i) => ({ x: lm[i].x * videoW, y: lm[i].y * videoH, z: lm[i].z * videoW });
+  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  function ear(lm, idx) {
+    const [p1, p2, p3, p4, p5, p6] = idx.map((i) => P(lm, i));
+    return (dist(p2, p6) + dist(p3, p5)) / (2 * dist(p1, p4));
   }
-  const isBlendshapes = (a) => a.length > 40 && a[0] && a[0].categoryName === '_neutral';
-  for (const name of ['filter', 'find']) {
-    const orig = Array.prototype[name];
-    Array.prototype[name] = function () {
-      if (isBlendshapes(this)) onBlendshapes(this);
-      return orig.apply(this, arguments);
+  function pitchDeg(lm) {
+    const top = P(lm, 10), chin = P(lm, 152);  // forehead, chin
+    return (Math.atan2(chin.z - top.z, chin.y - top.y) * 180) / Math.PI;  // > 0: head down
+  }
+  function irisDrop(lm) {
+    // Iris centre below the line between the eye corners, in eye widths.
+    const one = (iris, a, b) => {
+      const c = P(lm, iris), p = P(lm, a), q = P(lm, b);
+      return (c.y - (p.y + q.y) / 2) / dist(p, q);
     };
+    return (one(468, 33, 133) + one(473, 362, 263)) / 2;
   }
+  const percentile = (a, p) => { const s = a.slice().sort((x, y) => x - y); return s[Math.floor(p * s.length)]; };
+  const median = (a) => percentile(a, 0.5);
+
+  function updateUsualGaze(now, pitch, iris) {
+    if (gazeCamera !== current) { gazeCamera = current; gazeHistory = []; usualPitch = usualIris = null; }
+    secPitch += pitch; secIris += iris; secN++;
+    if (now - secStart < 1000) return;
+    gazeHistory.push([secPitch / secN, secIris / secN]);
+    if (gazeHistory.length > GAZE_WINDOW) gazeHistory.shift();
+    secStart = now; secPitch = secIris = 0; secN = 0;
+    if (gazeHistory.length >= 10) {
+      usualPitch = percentile(gazeHistory.map((g) => g[0]), 0.3);
+      usualIris = percentile(gazeHistory.map((g) => g[1]), 0.3);
+    }
+  }
+
+  let lastLandmarks = null;
+  function onLandmarks(lm) {
+    if (lm === lastLandmarks) return;
+    lastLandmarks = lm;
+    const now = Date.now();
+    if (now - lastFrameAt > 1000) resumeAt = now;
+    lastFrameAt = now;
+    const eL = ear(lm, L_EYE), eR = ear(lm, R_EYE), pitch = pitchDeg(lm), iris = irisDrop(lm);
+    frames++; tickPitch.push(pitch); tickIris.push(iris); tickEar.push((eL + eR) / 2);
+    updateUsualGaze(now, pitch, iris);
+    const down = usualPitch === null || pitch > usualPitch + PITCH_DOWN || iris > usualIris + IRIS_DOWN;
+    if (down) lastDownAt = now;
+    const usable = now - lastDownAt > DOWN_HOLD && now - lastSmileAt > SMILE_HOLD && now - resumeAt > GAP_HOLD;
+    if (usable) usableFrames++;
+
+    if (!baseL) { baseL = eL; baseR = eR; }
+    const closed = eL < baseL * BLINK_CLOSED && eR < baseR * BLINK_CLOSED;
+    const open = eL > baseL * BLINK_OPEN && eR > baseR * BLINK_OPEN;
+    if (closed) {
+      if (!closedSince) closedSince = now;
+      return;
+    }
+    if (open) {
+      // Usual openness follows slowly (about 2 s), from open frames only.
+      baseL += (eL - baseL) * 0.05; baseR += (eR - baseR) * 0.05;
+    }
+    if (!closedSince || !open) return;
+    const ms = now - closedSince;
+    closedSince = 0;
+    if (ms > BLINK_MAX_MS) return;  // eyes closed for a while, not a blink
+    blinkAll++;
+    if (afterSmile) { afterSmile = false; return; }  // the blink that answers a smile
+    if (!usable || !running()) return;
+    const d = today();
+    d.blinks = (d.blinks || 0) + 1;
+  }
+  const origPush = Array.prototype.push;
+  Array.prototype.push = function (...items) {
+    const n = origPush.apply(this, items);
+    if (n === 478 && items.length === 1 && typeof items[0].z === 'number' && typeof items[0].x === 'number') onLandmarks(this);
+    return n;
+  };
 
   let screenOn = true;
   let lastTick = Date.now();
@@ -311,44 +381,32 @@
     // Timers stop while the Mac sleeps; never count more than one missed tick.
     const dt = Math.min(now - lastTick, 2 * TICK_MS) / 1000;
     lastTick = now;
-    const samples = downSamples + upSamples;
-    const upShare = samples ? upSamples / samples : 1;
-    if (samples) log('gaze: down ' + (gazeSum / samples).toFixed(2) + ' blink ' + (blinkSum / samples).toFixed(2) + ' looking down ' + Math.round(100 * (1 - upShare)) + '%');
-    downSamples = upSamples = 0; gazeSum = blinkSum = 0;
+    const usableShare = frames ? usableFrames / frames : 0;
+    if (frames) {
+      const f1 = (v) => (v == null ? '-' : v.toFixed(1)), f2 = (v) => (v == null ? '-' : v.toFixed(2));
+      log('face: ' + frames + ' frames, pitch ' + f1(median(tickPitch)) + ' (max ' + f1(Math.max(...tickPitch)) + ', usual ' + f1(usualPitch) +
+        '), iris ' + f2(median(tickIris)) + ' (max ' + f2(Math.max(...tickIris)) + ', usual ' + f2(usualIris) + '), EAR ' + f2(median(tickEar)) +
+        ' (min ' + f2(Math.min(...tickEar)) + '), usable ' + Math.round(100 * usableShare) + '%, blinks ' + blinkAll + ' detected, today ' + (today().blinks || 0) + ' counted');
+    }
+    frames = usableFrames = 0; tickPitch = []; tickIris = []; tickEar = []; blinkAll = 0;
     if (!screenOn || !running()) return;
     const d = today();
     d.track += dt;
-    // Face time counts only the part spent not looking down.
-    if (!noFace()) d.face += dt * upShare;
+    if (!noFace()) d.blinkSec = (d.blinkSec || 0) + dt * usableShare;
     saveStats();
   }, TICK_MS);
 
-  // The app shows its own smile ~3 s after the face goes away (no blinks),
-  // before the no-face state is noticed (2 s debounce + polling). Smiles from
-  // just before a face loss are taken back.
-  const UNDO_MS = 5000;
-  let recentSmiles = [];
+  // Every time the smile appears (fsaux.m), except the no-face smile.
   window.__fsaux.smileShown = () => {
-    if (showing || !running() || noFace()) return;
-    if (Date.now() - lastDownAt < LOOK_DOWN_HOLD) { log('smile while looking down: not counted'); return; }
-    today().smiles++;
-    recentSmiles.push(Date.now());
-    saveStats();
-  };
-  window.__fsaux.faceLost = () => {
-    const undo = recentSmiles.filter((ts) => Date.now() - ts < UNDO_MS).length;
-    recentSmiles = [];
-    if (!undo) return;
-    const d = today();
-    d.smiles = Math.max(0, d.smiles - undo);
-    saveStats();
-    log('face lost: ' + undo + ' smile(s) not counted');
+    if (showing) return;
+    lastSmileAt = Date.now();
+    afterSmile = true;
   };
   window.__fsaux.screenOn = (on) => { screenOn = on; lastTick = Date.now(); };
   window.__fsaux.screenTime = ({ first, days }) => {
     for (const [k, sec] of Object.entries(days)) {
       // The log only reaches back about a week; keep what older runs saw.
-      const d = stats.days[k] || (stats.days[k] = { track: 0, face: 0, smiles: 0, screen: 0 });
+      const d = dayEntry(k);
       if (k > first) d.screen = sec; else d.screen = Math.max(d.screen, sec);
     }
     saveStats();
@@ -363,9 +421,10 @@
     if (!d || !d.screen || d.screen < 60) return null;
     return Math.min(100, (100 * d.track) / d.screen);
   }
-  function smileRate(d) {
-    if (!d || d.face < 300) return null;  // under 5 minutes says nothing
-    return d.smiles / (d.face / 3600);
+  const MIN_BLINK_SEC = 300;  // under 5 minutes of usable face time says nothing
+  function blinkRate(d) {
+    if (!d || !d.blinkSec || d.blinkSec < MIN_BLINK_SEC) return null;
+    return (d.blinks || 0) / (d.blinkSec / 60);
   }
 
   const de = () => {
@@ -377,12 +436,13 @@
     approval: ['allow eyeREST in System Settings → General → Login Items', 'eyeREST unter Systemeinstellungen → Allgemein → Anmeldeobjekte erlauben'],
     covTitle: ['Monitoring time', 'Überwachungszeit'],
     covSub: ['share of screen time with eyeREST monitoring', 'Anteil der Bildschirmzeit mit eyeREST-Überwachung'],
-    smileTitle: ['Smiles per hour', 'Smileys pro Stunde'],
-    smileSub: ['while monitoring with a face in view; fewer means you blink more often', 'während der Überwachung mit erkanntem Gesicht; weniger heißt: Sie blinzeln öfter'],
+    blinkTitle: ['Blinks per minute', 'Blinzler pro Minute'],
+    blinkSub: ['spontaneous blinks while your face is found and you look at the screen; blinks right after a smile don\'t count; more is better',
+      'spontane Blinzler, solange Ihr Gesicht erkannt wird und Sie auf den Bildschirm schauen; Blinzler direkt nach einem Smiley zählen nicht; mehr ist besser'],
     noData: ['no data', 'keine Daten'],
     of: ['of', 'von'],
-    smilesIn: ['smiles in', 'Smileys in'],
-    perHour: ['/h', '/h'],
+    blinksIn: ['blinks in', 'Blinzler in'],
+    perMin: ['/min', '/min'],
     last7: ['Last 7 days', 'Letzte 7 Tage'],
     prev7: ['previous 7 days', 'vorherige 7 Tage'],
     less: ['Less', 'Weniger'],
@@ -395,14 +455,14 @@
   };
   const fmtDate = (d) => d.toLocaleDateString(de() ? 'de-DE' : 'en-US', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 
-  // GitHub's light-theme greens, and an orange ramp for smiles (more = worse).
+  // GitHub's light-theme greens, and a blue ramp for blinks (more = better).
   const GREENS = ['#ebedf0', '#9be9a8', '#40c463', '#30a14e', '#216e39'];
-  const ORANGES = ['#ebedf0', '#ffdf9e', '#ffb35c', '#f0782b', '#bd3f0e'];
+  const BLUES = ['#ebedf0', '#c6dbef', '#6baed6', '#2171b5', '#08306b'];
   const WEEKS = 53;
   const CELL = 10, GAP = 3;
 
   // Level 1..4 for a value: fixed quarters for percentages, quartiles of the
-  // non-empty days for smile rates (as GitHub does for contributions).
+  // non-empty days for blink rates (as GitHub does for contributions).
   function levels(values, fixedMax) {
     if (fixedMax) return (v) => (v <= 0 ? 0 : Math.min(4, Math.ceil((4 * v) / fixedMax)));
     const sorted = values.filter((v) => v > 0).sort((a, b) => a - b);
@@ -416,7 +476,7 @@
     const start = new Date(end);
     // Columns are weeks starting on Monday; the last one holds today.
     start.setDate(end.getDate() - ((end.getDay() + 6) % 7) - 7 * (WEEKS - 1));
-    // Monitoring time and smiles are only known from the first recorded day.
+    // Monitoring time and blinks are only known from the first recorded day.
     const days = [];
     for (const d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
       const k = dayKey(d);
@@ -463,14 +523,14 @@
 
   // Average over a span of days, weighted by time: a 7-day trend line.
   function span(fromDaysAgo, toDaysAgo) {
-    let track = 0, screen = 0, face = 0, smiles = 0;
+    let track = 0, screen = 0, blinkSec = 0, blinks = 0;
     for (let i = fromDaysAgo; i > toDaysAgo; i--) {
       const d = new Date(); d.setDate(d.getDate() - i + 1);
-      const x = stats.days[dayKey(d)];
-      if (!x) continue;
-      track += x.track; screen += x.screen; face += x.face; smiles += x.smiles;
+      const k = dayKey(d), x = stats.days[k];
+      if (!x || k < stats.since) continue;  // before recording started
+      track += x.track; screen += x.screen; blinkSec += x.blinkSec || 0; blinks += x.blinks || 0;
     }
-    return { cov: screen >= 60 ? Math.min(100, (100 * track) / screen) : null, rate: face >= 300 ? smiles / (face / 3600) : null };
+    return { cov: screen >= 60 ? Math.min(100, (100 * track) / screen) : null, rate: blinkSec >= MIN_BLINK_SEC ? blinks / (blinkSec / 60) : null };
   }
 
   let panel = null, tip = null;
@@ -511,13 +571,13 @@
     body.textContent = '';
     const now7 = span(7, 0), prev7 = span(14, 7);
     const pct = (v) => (v == null ? '—' : Math.round(v) + ' %');
-    const rate = (v) => (v == null ? '—' : v.toFixed(1) + t('perHour'));
+    const rate = (v) => (v == null ? '—' : v.toFixed(1) + t('perMin'));
     body.append(
       section(t('covTitle'), t('covSub'),
         grid(coverage, GREENS, 100, (v, d) => Math.round(v) + ' % (' + fmtDur(d.track) + ' ' + t('of') + ' ' + fmtDur(d.screen) + ')'),
         t('last7') + ': ' + pct(now7.cov) + '  ·  ' + t('prev7') + ': ' + pct(prev7.cov)),
-      section(t('smileTitle'), t('smileSub'),
-        grid(smileRate, ORANGES, 0, (v, d) => v.toFixed(1) + t('perHour') + ' (' + d.smiles + ' ' + t('smilesIn') + ' ' + fmtDur(d.face) + ')'),
+      section(t('blinkTitle'), t('blinkSub'),
+        grid(blinkRate, BLUES, 0, (v, d) => v.toFixed(1) + t('perMin') + ' (' + (d.blinks || 0) + ' ' + t('blinksIn') + ' ' + fmtDur(d.blinkSec) + ')'),
         t('last7') + ': ' + rate(now7.rate) + '  ·  ' + t('prev7') + ': ' + rate(prev7.rate)),
     );
   }
