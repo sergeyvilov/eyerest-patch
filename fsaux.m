@@ -5,7 +5,7 @@
 // 2. The app is forced to be a menu-bar-only agent (no Dock icon); macOS only
 //    shows such overlays over full-screen apps for agent apps.
 // 3. The main window: minimize hides the window (reopen it via the menu-bar
-//    icon's Open), close quits the app. The window's traffic lights are HTML
+//    icon's Open), close quits the app after a confirmation. The window's traffic lights are HTML
 //    calling Tauri's minimize() (-> miniaturize:) and hide() (-> orderOut:).
 // 4. JS injection (fsaux-inject.js): automatic camera, smile while no face is
 //    detected, auto-start of monitoring.
@@ -191,20 +191,50 @@ static void fsaux_quit(NSWindow *w, NSString *why) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ exit(0); });
 }
 
+// Every user-initiated exit asks first (logout/shutdown don't go through here).
+// The alert runs on the next run-loop turn, outside tao's event handler.
+static BOOL uiGerman;  // app language, reported by the JS
+static BOOL confirming;
+
+static void fsaux_confirmQuit(NSWindow *w, NSString *why) {
+    if (confirming || quitting) return;
+    confirming = YES;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [NSApp activateIgnoringOtherApps:YES];
+        NSAlert *a = [NSAlert new];
+        a.messageText = uiGerman ? @"eyeREST beenden?" : @"Quit eyeREST?";
+        a.informativeText = uiGerman ? @"Ihre Blinzler werden dann nicht mehr überwacht."
+                                     : @"Your blinking will no longer be monitored.";
+        [a addButtonWithTitle:uiGerman ? @"Beenden" : @"Quit"];
+        [a addButtonWithTitle:uiGerman ? @"Abbrechen" : @"Cancel"].keyEquivalent = @"\033";
+        // runModal resets the level, and macOS may not let a background agent
+        // app come to the front: raise the alert once the modal loop runs.
+        [[NSRunLoop mainRunLoop] performInModes:@[NSModalPanelRunLoopMode] block:^{
+            a.window.level = NSStatusWindowLevel + 2;  // above the main window and the smile
+            [a.window orderFrontRegardless];
+            [a.window makeKeyWindow];
+        }];
+        BOOL quit = [a runModal] == NSAlertFirstButtonReturn;
+        confirming = NO;
+        if (quit) fsaux_quit(w, why);
+        else fsaux_log(w, [why stringByAppendingString:@" cancelled"]);
+    });
+}
+
 static void hookPerformClose(NSWindow *self, SEL _cmd, id sender) {
-    if (fsaux_isMainWindow(self)) return fsaux_quit(self, @"performClose->quit");
+    if (fsaux_isMainWindow(self)) return fsaux_confirmQuit(self, @"performClose->quit");
     origPerformClose(self, _cmd, sender);
 }
 
 // eyeREST's HTML close button calls Tauri's window.hide(), i.e. orderOut:.
 static void hookOrderOut(NSWindow *self, SEL _cmd, id sender) {
-    if (fsaux_isMainWindow(self) && self.isVisible) return fsaux_quit(self, @"orderOut->quit");
+    if (fsaux_isMainWindow(self) && self.isVisible) return fsaux_confirmQuit(self, @"orderOut->quit");
     origOrderOut(self, _cmd, sender);
 }
 
 static void hookClose(NSWindow *self, SEL _cmd) {
     // Programmatic close (e.g. a custom HTML close button calling window.close()).
-    if (fsaux_isMainWindow(self) && self.isVisible) return fsaux_quit(self, @"close->quit");
+    if (fsaux_isMainWindow(self) && self.isVisible) return fsaux_confirmQuit(self, @"close->quit");
     origClose(self, _cmd);
 }
 
@@ -326,6 +356,7 @@ static void fsaux_ghost(NSWindow *w, BOOL on) {
         fsaux_log(m.webView.window, [NSString stringWithFormat:@"JS %@", d[@"msg"]]);
     } else if ([cmd isEqual:@"state"]) {
         monitoringRunning = [d[@"running"] boolValue];
+        uiGerman = [d[@"de"] boolValue];
         fsaux_log(m.webView.window, monitoringRunning ? @"state running" : @"state stopped");
     } else if ([cmd isEqual:@"ghost"]) {
         fsaux_ghost(m.webView.window, [d[@"on"] boolValue]);
@@ -554,7 +585,7 @@ static void fsaux_runJS(NSString *js) {
 }
 - (void)start:(id)sender { fsaux_runJS(@"window.__fsaux && window.__fsaux.start()"); }
 - (void)stop:(id)sender { fsaux_runJS(@"window.__fsaux && window.__fsaux.stop()"); }
-- (void)exit:(id)sender { fsaux_quit(fsaux_mainWindow(), @"menu exit->quit"); }
+- (void)exit:(id)sender { fsaux_confirmQuit(fsaux_mainWindow(), @"menu exit->quit"); }
 - (BOOL)validateMenuItem:(NSMenuItem *)item {
     if (item.action == @selector(start:)) return !monitoringRunning;
     if (item.action == @selector(stop:)) return monitoringRunning;

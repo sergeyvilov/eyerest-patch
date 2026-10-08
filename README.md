@@ -7,7 +7,7 @@ Patches the Mac App Store build of **eyeREST** (`com.vinlemon.eyeREST`, tested w
 1. **The blink smile shows over full-screen apps** (VSCode, browsers, …).
 2. **No Dock icon.** The app lives only in the menu bar (the glasses icon).
 3. **The main window's yellow (minimize) button hides the window.** Bring it back with **Open** in the glasses icon's menu.
-4. **The main window's red (close) button quits the app.**
+4. **The main window's red (close) button quits the app**, after a confirmation ("eyeREST beenden?" / "Quit eyeREST?").
 5. **Automatic camera.** The camera dropdown gets an extra first entry, **"Auto ⟳ <camera in use>"**. While it's selected, eyeREST uses a connected external camera, or the built-in one if there isn't one. Plugging a camera in or out while monitoring switches cameras on the fly. On the first launch of the patched app, the saved camera is switched to Auto once; you can still pick a specific camera.
 6. **The smile stays up while no face is detected** (while monitoring is running), so you notice you've drifted off-camera. It floats above all other apps, but **below eyeREST's own window** while you're using it, so it never covers the settings.
 7. **Glasses icon menu:** clicking the menu-bar icon (left or right click) opens a menu with **Open**, **Start**, **Stop** and **Exit**. Start and Stop are greyed out when they don't apply.
@@ -24,6 +24,8 @@ Patches the Mac App Store build of **eyeREST** (`com.vinlemon.eyeREST`, tested w
 11. **"Run at startup" checkbox** (Beim Systemstart ausführen) under the start/stop button. When it's ticked, eyeREST starts at login with monitoring running. Open the window with the glasses icon's **Open**. It shows up in System Settings → General → Login Items as eyeREST. If macOS asks you to allow it there, the checkbox says so. The app's own built-in autostart can't work inside the macOS sandbox, which is why this replaces it.
 
 12. **The main window stays hidden at launch.** eyeREST starts straight into the menu bar with monitoring running. Open the window with the glasses icon's **Open**, or by opening eyeREST again (Finder, Spotlight, Launchpad) while it's running. It does show at launch while the camera permission or the app's first-run intro is still pending.
+
+13. **Exit asks for confirmation**, both from the menu's **Exit** and from the red close button. Return quits and Esc cancels. Logging out or shutting down isn't held up.
 
 ## Quick start
 

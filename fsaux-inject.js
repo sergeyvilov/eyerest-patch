@@ -241,11 +241,15 @@
     }
   }, 1000);
 
-  // Tell the native menu whether monitoring is running.
+  // Tell the native side whether monitoring is running (menu) and the app's
+  // language (exit confirmation).
   let lastState = null;
   workerInterval(() => {
-    const r = running();
-    if (r !== lastState) { lastState = r; post({ cmd: 'state', running: r }); }
+    let lang = false;
+    try { lang = JSON.parse(localStorage.getItem('settings')).global.languageCode === 'de'; } catch (e) {}
+    const st = { cmd: 'state', running: running(), de: lang };
+    const key = JSON.stringify(st);
+    if (key !== lastState) { lastState = key; post(st); }
   }, 500);
 
   // ---------- 4. usage statistics ----------
