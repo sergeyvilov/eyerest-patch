@@ -182,7 +182,7 @@
   workerInterval(() => {
     const want = noFace() && popupEnabled();
     if (want) {
-      if (!showing) log('no face -> showing smile');
+      if (!showing) { log('no face -> showing smile'); window.__fsaux.faceLost(); }
       showing = true;
       invoke('show_blink_popup');
     } else if (showing) {
@@ -367,17 +367,29 @@
     qGap.push(Math.max(gap(L_EYE), gap(R_EYE)));
     qAngle.push(Math.max(Math.abs(yaw), Math.abs(pitch)));
   }
+  // Away from the camera (or just sitting down / getting up) says nothing
+  // about the camera angle: start the minute over and hide the smile note.
+  window.__fsaux.faceLost = () => {
+    qGap = []; qAngle = []; qHistory = [];
+    if (quality) log('detection quality: face lost, measuring again');
+    quality = null;
+    try { localStorage.setItem(QUALITY_KEY, JSON.stringify({ level: null, poorFor: false, at: Date.now() })); } catch (e) {}
+    const line = document.getElementById('fsaux-quality');
+    if (line) line.remove();
+  };
   function updateQuality() {
     if (qGap.length >= 20) qHistory.push([median(qGap), median(qAngle)]);
     qGap = []; qAngle = [];
     if (qHistory.length > 6) qHistory.shift();
-    if (!qHistory.length) return;
+    if (!qHistory.length || noFace()) return;
     const gap = median(qHistory.map((q) => q[0])), angle = median(qHistory.map((q) => q[1]));
     const level = gap < GAP_FAIR || angle > ANGLE_FAIR ? 'poor' : gap < GAP_GOOD || angle > ANGLE_GOOD ? 'fair' : 'good';
     const changed = !quality || quality.level !== level;
     quality = { level, gap: +gap.toFixed(1), angle: Math.round(angle), at: Date.now() };
     // The smile window shows its note only after a minute of poor quality.
-    try { localStorage.setItem(QUALITY_KEY, JSON.stringify({ ...quality, poorFor: level === 'poor' && qHistory.length >= 6 })); } catch (e) {}
+    // poorFor: a whole minute of poor quality since the face was last found.
+    const poorFor = qHistory.length >= 6 && qHistory.every((q) => q[0] < GAP_FAIR || q[1] > ANGLE_FAIR);
+    try { localStorage.setItem(QUALITY_KEY, JSON.stringify({ ...quality, poorFor })); } catch (e) {}
     if (changed) log('detection quality ' + level + ' (eyelid gap ' + quality.gap + ' px, head angle ' + quality.angle + ' deg)');
     addQualityLine();
   }
