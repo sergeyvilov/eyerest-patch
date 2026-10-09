@@ -37,6 +37,8 @@ The app's face model (MediaPipe Face Landmarker, about 13 frames per second) bui
 
 14. **All of the patch's texts follow the app's language** (English, German, Italian, Spanish, Russian, Japanese, Chinese): the statistics, the "Run at startup" checkbox, the footer link and the exit dialog. Reopening the window always shows the main view, even if the statistics were open before.
 
+15. **4-second pop-up timer.** The timer choice gets a **4s** button between 3s and 5s, labeled in the app's language (4s, 4с, 4秒, …). The app's list of timer buttons can't be extended, but the setting accepts any number of seconds. Choosing 4s saves it and reloads the app's page (about 2 s), since the app reads its settings only at start. Monitoring restarts by itself.
+
 ## Quick start
 
 ```bash

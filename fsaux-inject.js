@@ -18,6 +18,7 @@
 //    smile. Screen-on time comes from the macOS power log (fsaux.m).
 // 5. "Run at startup" checkbox under the start/stop button. The window starts
 //    hidden (fsaux.m) unless the camera permission or intro is still pending.
+// 6. A "4s" choice in the pop-up timer (the app offers 3/5/10/15 s).
 (() => {
   if (location.pathname !== '/' && location.pathname !== '/index.html') return;
 
@@ -689,6 +690,51 @@
   }
   new MutationObserver(() => addAutostartBox(false)).observe(document.documentElement, { childList: true, subtree: true });
   post({ cmd: 'autostart' });
+
+  // ---------- 6. 4 s pop-up timer ----------
+  // The app's timer buttons come from a fixed list that can't be extended,
+  // but the setting takes any number of seconds. The 4s button is a copy of
+  // the 3s one; choosing it saves timerDuration = 4 and reloads the page, as
+  // the app only reads its settings at start (monitoring restarts by itself).
+  const EXTRA_TIMER = 4;
+  function timerSetting() {
+    try { return JSON.parse(localStorage.getItem('settings')).config.timerDuration; } catch (e) { return null; }
+  }
+  function addTimerButton() {
+    const three = document.querySelector('[data-scope="radio-group"][data-part="item"] input[type="radio"][value="3"]');
+    const item3 = three && three.closest('[data-part="item"]');
+    if (!item3) return;
+    let item = document.getElementById('fsaux-timer-4');
+    if (!item) {
+      item = item3.cloneNode(true);
+      item.id = 'fsaux-timer-4';
+      item.removeAttribute('for');
+      item.querySelector('input').remove();
+      for (const el of item.querySelectorAll('[id]')) el.removeAttribute('id');
+      item.style.cursor = 'pointer';
+      item.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (timerSetting() === EXTRA_TIMER) return;
+        try {
+          const st = JSON.parse(localStorage.getItem('settings'));
+          st.config.timerDuration = EXTRA_TIMER;
+          localStorage.setItem('settings', JSON.stringify(st));
+        } catch (err) { log('4s timer failed: ' + err); return; }
+        log('timer -> 4 s, reloading');
+        location.reload();
+      });
+      item3.after(item);
+    }
+    // Same wording as the app's own button in the current language (3s, 3с, 3秒…).
+    const text3 = item3.querySelector('[data-part="item-text"]'), text = item.querySelector('[data-part="item-text"]');
+    const label = text3 ? text3.textContent.replace('3', String(EXTRA_TIMER)) : EXTRA_TIMER + 's';
+    if (text && text.textContent !== label) text.textContent = label;
+    const state = timerSetting() === EXTRA_TIMER ? 'checked' : 'unchecked';
+    for (const el of [item, ...item.querySelectorAll('[data-state]')]) {
+      if (el.getAttribute('data-state') !== state) el.setAttribute('data-state', state);
+    }
+  }
+  new MutationObserver(addTimerButton).observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['data-state'] });
 
   log('inject ready');
 })();
