@@ -21,6 +21,8 @@
 // 6. A "4s" choice in the pop-up timer (the app offers 3/5/10/15 s).
 // 7. "Count incomplete blinks" checkbox below the eye choice; blinks detected
 //    here are also passed on to the app's smile timer (section 4).
+// 8. "Any" eye choice; detection quality line, and a note in the smile
+//    window when it stays poor (second script below, for that window).
 (() => {
   if (location.pathname !== '/' && location.pathname !== '/index.html') return;
 
@@ -275,16 +277,16 @@
   // picked up when the last point arrives.
   //
   // Blink: eye aspect ratio (EAR, eyelid gap / eye width) per eye, relative
-  // to its usual openness (slow average over open frames). A blink: the eye
-  // chosen in the app (L or R) below BLINK_CLOSED, or with LR the eye that
-  // closes further below BLINK_CLOSED while the other dips below BLINK_BOTH
-  // (at an angle the camera sees one eye much more obliquely); open again
-  // (above BLINK_OPEN) within BLINK_MAX_MS. Full if it got below BLINK_FULL,
-  // else incomplete. Shallower eyelid movements are not counted: at an angle
-  // they can't be told from noise. Calibrated with 2 x 20 counted blinks
-  // (found 20 and 21, 2 false in 70 s of reading/holding the eyes open).
-  // As in the app, L is MediaPipe's left eye (points 362...), R its right
-  // eye (points 33...).
+  // to its usual openness (slow average over open frames). Which eye counts
+  // follows the eye choice: L or R that eye, LR both together (average, as
+  // in the app), Any (added by the patch) whichever closes further, best
+  // when the camera sees one eye much more obliquely. A blink: below
+  // BLINK_CLOSED, open again (above BLINK_OPEN) within BLINK_MAX_MS. Full if
+  // it got below BLINK_FULL, else incomplete. Shallower eyelid movements are
+  // not counted: they blend into slow eyelid movements (reading, gaze).
+  // Calibrated with 2 x 20 counted blinks (found 20 and 21, 2 false in 70 s
+  // of reading/holding the eyes open). As in the app, L is MediaPipe's left
+  // eye (points 362...), R its right eye (points 33...).
   // Looking down: head pitch (forehead vs chin in 3D) in degrees, relative to
   // the usual pitch for this camera (30th percentile of the last 5 minutes,
   // so a camera above the screen doesn't count as "down" and long writing
@@ -292,7 +294,8 @@
   // A frame counts (time and blinks) only while you are not looking down, and
   // not just after a smile (the first blink after it and any within
   // SMILE_HOLD are deliberate) or after the face was found again.
-  const BLINK_CLOSED = 0.55, BLINK_BOTH = 0.8, BLINK_OPEN = 0.8, BLINK_MAX_MS = 800;
+  const BLINK_CLOSED = 0.55, BLINK_OPEN = 0.8, BLINK_MAX_MS = 800;
+  const EYE_ANY = 'ANY';
   const BLINK_FULL = 0.47;      // closed to under this share of usual openness = full blink, else incomplete
   const PITCH_DOWN = 12;        // degrees below the usual head pitch (writing: ~25, keyboard: ~15)
   const IRIS_DOWN = 0.12;       // iris drop below usual, in eye widths
@@ -348,6 +351,37 @@
     }
   }
 
+  // Detection quality, from geometry only (no per-person calibration): the
+  // open eyelid gap in camera pixels (distance, camera angle and resolution
+  // together; the face model places points to within ~1-2 px, so an
+  // incomplete blink in a small gap barely shows) and the head angle to the
+  // camera. Medians over the last minute. Shared with the smile window
+  // through localStorage.
+  const QUALITY_KEY = 'fsaux-quality';
+  const GAP_GOOD = 9, GAP_FAIR = 6, ANGLE_GOOD = 15, ANGLE_FAIR = 25;
+  let qGap = [], qAngle = [], qHistory = [], quality = null;
+  function noteQuality(lm, pitch) {
+    const gap = (idx) => { const [p1, p2, p3, p4, p5, p6] = idx.map((i) => P(lm, i)); return (dist(p2, p6) + dist(p3, p5)) / 2; };
+    const a = P(lm, 234), b = P(lm, 454);  // face edges, for the turn to the side
+    const yaw = (Math.atan2(b.z - a.z, b.x - a.x) * 180) / Math.PI;
+    qGap.push(Math.max(gap(L_EYE), gap(R_EYE)));
+    qAngle.push(Math.max(Math.abs(yaw), Math.abs(pitch)));
+  }
+  function updateQuality() {
+    if (qGap.length >= 20) qHistory.push([median(qGap), median(qAngle)]);
+    qGap = []; qAngle = [];
+    if (qHistory.length > 6) qHistory.shift();
+    if (!qHistory.length) return;
+    const gap = median(qHistory.map((q) => q[0])), angle = median(qHistory.map((q) => q[1]));
+    const level = gap < GAP_FAIR || angle > ANGLE_FAIR ? 'poor' : gap < GAP_GOOD || angle > ANGLE_GOOD ? 'fair' : 'good';
+    const changed = !quality || quality.level !== level;
+    quality = { level, gap: +gap.toFixed(1), angle: Math.round(angle), at: Date.now() };
+    // The smile window shows its note only after a minute of poor quality.
+    try { localStorage.setItem(QUALITY_KEY, JSON.stringify({ ...quality, poorFor: level === 'poor' && qHistory.length >= 6 })); } catch (e) {}
+    if (changed) log('detection quality ' + level + ' (eyelid gap ' + quality.gap + ' px, head angle ' + quality.angle + ' deg)');
+    addQualityLine();
+  }
+
   let lastLandmarks = null;
   function onLandmarks(lm) {
     if (lm === lastLandmarks) return;
@@ -365,10 +399,10 @@
 
     if (!baseL) { baseL = eL; baseR = eR; }
     const rL = eL / baseL, rR = eR / baseR;
-    const ratio = eyes === 'L' ? rL : eyes === 'R' ? rR : Math.min(rL, rR);  // the eye that closes further
-    const other = eyes === 'LR' ? Math.max(rL, rR) : ratio;
-    const closed = ratio < BLINK_CLOSED && other < BLINK_BOTH;
+    const ratio = eyes === 'L' ? rL : eyes === 'R' ? rR : eyes === EYE_ANY ? Math.min(rL, rR) : (rL + rR) / 2;
+    const closed = ratio < BLINK_CLOSED;
     const open = ratio > BLINK_OPEN;
+    if (rL > 0.85 && rR > 0.85) noteQuality(lm, pitch);
     if (closed) {
       if (!closedSince) { closedSince = now; closedMin = 1; }
       closedMin = Math.min(closedMin, ratio);
@@ -403,14 +437,17 @@
   // - "Count incomplete blinks" on (default): the app's rule keeps working;
   //   it is replayed here, and blinks it missed (none counted within
   //   APP_BLINK_WINDOW) are passed on.
-  // - Off: only full blinks count. The app's scores are handed to it as 0
-  //   (ignored by its rule), and only full blinks detected here are passed on.
-  const APP_JUMP = 0.2, APP_BLINK_WINDOW = 700;
+  // - Off: only full blinks count. Between them the app gets a neutral low
+  //   score (APP_NEUTRAL; a 0 would be skipped, and with only 1s its average
+  //   would be 1 and no 1 would stand out), and only full blinks detected
+  //   here are passed on. The same goes for the Any eye choice, for which the
+  //   app's own lookup finds no eye.
+  const APP_JUMP = 0.2, APP_BLINK_WINDOW = 700, APP_NEUTRAL = 0.01;
   const INCOMPLETE_KEY = 'fsaux-count-incomplete';
   const countIncomplete = () => { try { return localStorage.getItem(INCOMPLETE_KEY) !== '0'; } catch (e) { return true; } };
   let appValues = [], appBlinkAt = 0, passPending = false, fullOnly = !countIncomplete();
   function passBlinkToApp(now, full) {
-    if (fullOnly ? full : now - appBlinkAt > APP_BLINK_WINDOW) passPending = true;
+    if (fullOnly ? full : eyes === EYE_ANY || now - appBlinkAt > APP_BLINK_WINDOW) passPending = true;
   }
   const isBlendshapes = (a) => a.length > 40 && a[0] && a[0].categoryName === '_neutral';
   function appScore(cats) {
@@ -419,7 +456,7 @@
       if (c.categoryName === 'eyeBlinkLeft') l = c.score;
       else if (c.categoryName === 'eyeBlinkRight') r = c.score;
     }
-    return eyes === 'L' ? l : eyes === 'R' ? r : (l + r) / 2;
+    return eyes === 'L' ? l : eyes === 'R' ? r : eyes === EYE_ANY ? 0 : (l + r) / 2;
   }
   function replayAppRule(u, now) {
     if (!u) return;
@@ -435,14 +472,17 @@
       const result = orig.apply(this, arguments);
       if (!isBlendshapes(this)) return result;
       const now = Date.now();
-      if (passPending && (fullOnly || now - appBlinkAt > APP_BLINK_WINDOW)) {
+      if (passPending && (fullOnly || eyes === EYE_ANY || now - appBlinkAt > APP_BLINK_WINDOW)) {
         passPending = false;
         passed++;
         replayAppRule(1, now);
+        // With Any the app's own lookup finds no eye; hand it one.
+        if (result === undefined) return { index: 9, categoryName: 'eyeBlinkLeft', displayName: '', score: 1 };
         return handTo(result, 1);
       }
       passPending = false;
-      if (fullOnly) return handTo(result, 0);
+      if (result === undefined && eyes === EYE_ANY) return { index: 9, categoryName: 'eyeBlinkLeft', displayName: '', score: APP_NEUTRAL };
+      if (fullOnly || eyes === EYE_ANY) return handTo(result, APP_NEUTRAL);
       replayAppRule(appScore(this), now);
       return result;
     };
@@ -471,6 +511,7 @@
     frames = usableFrames = 0; tickPitch = []; tickIris = []; tickEar = []; blinkAll = 0; blinkFull = 0; passed = 0;
     eyes = eyeChoice();
     fullOnly = !countIncomplete();
+    updateQuality();
     if (!screenOn || !running()) return;
     const d = today();
     d.track += dt;
@@ -561,6 +602,29 @@
     prev7: { en: 'previous 7 days', de: 'vorherige 7 Tage', it: '7 giorni precedenti', es: '7 días anteriores', ru: 'предыдущие 7 дней', ja: 'その前の7日間', zh: '之前7天' },
     less: { en: 'Less', de: 'Weniger', it: 'Meno', es: 'Menos', ru: 'Меньше', ja: '少', zh: '少' },
     more: { en: 'More', de: 'Mehr', it: 'Più', es: 'Más', ru: 'Больше', ja: '多', zh: '多' },
+    eyeAny: { en: 'Any', de: 'Beliebig', it: 'Uno', es: 'Uno', ru: 'Любой', ja: '片方', zh: '任一' },
+    eyeAnyTip: {
+      en: 'A blink counts when either eye closes. Best when the camera sees you at an angle.',
+      de: 'Ein Blinzler zählt, wenn eines der Augen schließt. Am besten, wenn die Kamera Sie schräg sieht.',
+      it: "Un battito conta quando si chiude uno qualsiasi dei due occhi. Ideale se la fotocamera ti vede di lato.",
+      es: 'Un parpadeo cuenta cuando se cierra cualquiera de los dos ojos. Ideal si la cámara te ve de lado.',
+      ru: 'Моргание засчитывается, когда закрывается любой глаз. Лучше всего, если камера видит вас под углом.',
+      ja: 'どちらかの目が閉じればまばたきとして数えます。カメラが斜めから見ている場合に最適です。',
+      zh: '任一只眼睛闭合即计为眨眼。适合摄像头从侧面看到您的情况。',
+    },
+    quality: { en: 'Detection', de: 'Erkennung', it: 'Rilevamento', es: 'Detección', ru: 'Распознавание', ja: '検出', zh: '检测' },
+    good: { en: 'good', de: 'gut', it: 'buono', es: 'buena', ru: 'хорошее', ja: '良好', zh: '良好' },
+    fair: { en: 'fair', de: 'mittel', it: 'medio', es: 'regular', ru: 'среднее', ja: '普通', zh: '一般' },
+    poor: { en: 'poor', de: 'schlecht', it: 'scarso', es: 'mala', ru: 'плохое', ja: '不良', zh: '较差' },
+    qualityHint: {
+      en: 'face the camera more directly or move closer',
+      de: 'Kamera gerader auf das Gesicht richten oder näher rücken',
+      it: 'mettiti più di fronte alla fotocamera o avvicinati',
+      es: 'colócate más de frente a la cámara o acércate',
+      ru: 'расположите камеру прямо напротив лица или сядьте ближе',
+      ja: 'カメラに顔を正面に向けるか、近づいてください',
+      zh: '请正对摄像头或靠近一些',
+    },
     countIncomplete: { en: 'Count incomplete blinks', de: 'Unvollständige Blinzler zählen', it: 'Conta i battiti di ciglia incompleti', es: 'Contar parpadeos incompletos', ru: 'Учитывать неполные моргания', ja: '不完全なまばたきも数える', zh: '计入不完全眨眼' },
     countIncompleteOff: {
       en: 'only full blinks dismiss the smile',
@@ -786,6 +850,69 @@
   new MutationObserver(() => addAutostartBox(false)).observe(document.documentElement, { childList: true, subtree: true });
   post({ cmd: 'autostart' });
 
+  // ---------- 8. "Any" eye choice and detection quality ----------
+  // A copy of the LR button; choosing it saves eyeStatus = 'ANY' and reloads
+  // (the app reads its settings at start). The app's own blink rule finds no
+  // eye for it, so only blinks detected here reach it (see passBlinkToApp).
+  function addAnyButton() {
+    const lr = document.querySelector('[data-scope="radio-group"][data-part="item"] input[type="radio"][value="LR"]');
+    const itemLR = lr && lr.closest('[data-part="item"]');
+    if (!itemLR) return;
+    let item = document.getElementById('fsaux-eye-any');
+    if (!item) {
+      item = itemLR.cloneNode(true);
+      item.id = 'fsaux-eye-any';
+      item.removeAttribute('for');
+      item.querySelector('input').remove();
+      for (const el of item.querySelectorAll('[id]')) el.removeAttribute('id');
+      item.style.cursor = 'pointer';
+      // The app's buttons have a fixed width; this label can be longer.
+      item.style.width = 'auto';
+      item.style.minWidth = getComputedStyle(itemLR).width;
+      item.style.paddingInline = '12px';
+      item.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (eyeChoice() === EYE_ANY) return;
+        try {
+          const st = JSON.parse(localStorage.getItem('settings'));
+          st.config.eyeStatus = EYE_ANY;
+          localStorage.setItem('settings', JSON.stringify(st));
+        } catch (err) { log('Any eye choice failed: ' + err); return; }
+        log('eye choice -> Any, reloading');
+        location.reload();
+      });
+      itemLR.after(item);
+    }
+    const text = item.querySelector('[data-part="item-text"]');
+    if (text && text.textContent !== t('eyeAny')) text.textContent = t('eyeAny');
+    if (item.title !== t('eyeAnyTip')) item.title = t('eyeAnyTip');
+    const state = eyeChoice() === EYE_ANY ? 'checked' : 'unchecked';
+    for (const el of [item, ...item.querySelectorAll('[data-state]')]) {
+      if (el.getAttribute('data-state') !== state) el.setAttribute('data-state', state);
+    }
+  }
+  new MutationObserver(addAnyButton).observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['data-state'] });
+
+  // "Detection: ● good" below the "count incomplete blinks" checkbox.
+  const QUALITY_COLORS = { good: '#2da44e', fair: '#d4a72c', poor: '#cf222e' };
+  function addQualityLine() {
+    const box = document.getElementById('fsaux-incomplete');
+    if (!box || !quality || !running()) { const old = document.getElementById('fsaux-quality'); if (old && !running()) old.remove(); return; }
+    let line = document.getElementById('fsaux-quality');
+    if (!line) {
+      line = document.createElement('div');
+      line.id = 'fsaux-quality';
+      line.className = 'text textStyle_sm';
+      line.style.cssText = 'margin-top:10px;font-size:13px';
+      box.after(line);
+    }
+    const want = '<span style="color:' + QUALITY_COLORS[quality.level] + '">●</span> ' + t('quality') + ': ' + t(quality.level) +
+      (quality.level === 'good' ? '' : '<div style="color:#57606a;font-size:12px">' + t('qualityHint') + '</div>');
+    if (line.innerHTML !== want) line.innerHTML = want;
+    line.title = quality.gap + ' px, ' + quality.angle + '°';
+  }
+  new MutationObserver(() => { if (quality && !document.getElementById('fsaux-quality')) addQualityLine(); }).observe(document.documentElement, { childList: true, subtree: true });
+
   // ---------- 7. "count incomplete blinks" checkbox ----------
   // Below the eye choice (L / R / LR). See passBlinkToApp() above.
   function addIncompleteBox() {
@@ -863,4 +990,37 @@
   new MutationObserver(addTimerButton).observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['data-state'] });
 
   log('inject ready');
+})();
+
+// Smile window (/src/windows/blink/index.html): a short note at the bottom
+// while the main window reports poor detection for a minute (localStorage
+// 'fsaux-quality', written by the main window; the 'storage' event fires
+// here when it changes).
+(() => {
+  if (!/\/windows\/blink\//.test(location.pathname)) return;
+  const NOTE = {
+    en: 'Adjust the camera angle', de: 'Kamerawinkel anpassen', it: "Regola l'angolo della fotocamera", es: 'Ajusta el ángulo de la cámara',
+    ru: 'Поправьте угол камеры', ja: 'カメラの角度を調整してください', zh: '请调整摄像头角度',
+  };
+  const STALE_MS = 2 * 60 * 1000;
+  function update() {
+    let q = null, lang = 'en';
+    try { q = JSON.parse(localStorage.getItem('fsaux-quality')); } catch (e) {}
+    try { lang = JSON.parse(localStorage.getItem('settings')).global.languageCode || 'en'; } catch (e) {}
+    const show = !!(q && q.poorFor && Date.now() - q.at < STALE_MS);
+    let note = document.getElementById('fsaux-note');
+    if (!show) { if (note) note.remove(); return; }
+    if (!document.body) return;
+    if (!note) {
+      note = document.createElement('div');
+      note.id = 'fsaux-note';
+      note.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;z-index:10;text-align:center;font:600 11px/1.3 -apple-system,sans-serif;' +
+        'color:#fff;background:rgba(207,34,46,0.85);border-radius:6px;padding:3px 6px;pointer-events:none';
+      document.body.appendChild(note);
+    }
+    note.textContent = NOTE[lang] || NOTE.en;
+  }
+  window.addEventListener('storage', (e) => { if (!e.key || e.key === 'fsaux-quality' || e.key === 'settings') update(); });
+  document.addEventListener('visibilitychange', update);
+  document.addEventListener('DOMContentLoaded', update);
 })();
