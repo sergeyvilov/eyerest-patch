@@ -1026,8 +1026,8 @@
     if (!note) {
       note = document.createElement('div');
       note.id = 'fsaux-note';
-      note.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;z-index:10;text-align:center;font:600 11px/1.3 -apple-system,sans-serif;' +
-        'color:#cf222e;background:transparent;border:1.5px solid #cf222e;border-radius:6px;padding:2px 6px;pointer-events:none';
+      note.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;z-index:10;text-align:center;font:500 10px/1.3 -apple-system,sans-serif;' +
+        'color:rgba(60,60,60,0.75);background:transparent;border:1px solid rgba(0,0,0,0.18);border-radius:6px;padding:2px 6px;pointer-events:none';
       document.body.appendChild(note);
     }
     note.textContent = NOTE[lang] || NOTE.en;
