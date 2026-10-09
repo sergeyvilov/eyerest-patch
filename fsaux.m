@@ -193,7 +193,22 @@ static void fsaux_quit(NSWindow *w, NSString *why) {
 
 // Every user-initiated exit asks first (logout/shutdown don't go through here).
 // The alert runs on the next run-loop turn, outside tao's event handler.
-static BOOL uiGerman;  // app language, reported by the JS
+static NSString *uiLang = @"en";  // app language code, reported by the JS
+
+// Exit dialog texts: title, message, quit, cancel.
+static NSArray<NSString *> *fsaux_quitTexts(void) {
+    static NSDictionary<NSString *, NSArray<NSString *> *> *texts;
+    if (!texts) texts = @{
+        @"en": @[@"Quit eyeREST?", @"Your blinking will no longer be monitored.", @"Quit", @"Cancel"],
+        @"de": @[@"eyeREST beenden?", @"Ihre Blinzler werden dann nicht mehr überwacht.", @"Beenden", @"Abbrechen"],
+        @"it": @[@"Uscire da eyeREST?", @"I tuoi battiti di ciglia non saranno più monitorati.", @"Esci", @"Annulla"],
+        @"es": @[@"¿Salir de eyeREST?", @"Tus parpadeos dejarán de monitorizarse.", @"Salir", @"Cancelar"],
+        @"ru": @[@"Выйти из eyeREST?", @"Моргания больше не будут отслеживаться.", @"Выйти", @"Отменить"],
+        @"ja": @[@"eyeREST を終了しますか？", @"まばたきのモニタリングが停止します。", @"終了", @"キャンセル"],
+        @"zh": @[@"退出 eyeREST？", @"将不再监测您的眨眼。", @"退出", @"取消"],
+    };
+    return texts[uiLang] ?: texts[@"en"];
+}
 static BOOL confirming;
 
 static void fsaux_confirmQuit(NSWindow *w, NSString *why) {
@@ -202,11 +217,11 @@ static void fsaux_confirmQuit(NSWindow *w, NSString *why) {
     dispatch_async(dispatch_get_main_queue(), ^{
         [NSApp activateIgnoringOtherApps:YES];
         NSAlert *a = [NSAlert new];
-        a.messageText = uiGerman ? @"eyeREST beenden?" : @"Quit eyeREST?";
-        a.informativeText = uiGerman ? @"Ihre Blinzler werden dann nicht mehr überwacht."
-                                     : @"Your blinking will no longer be monitored.";
-        [a addButtonWithTitle:uiGerman ? @"Beenden" : @"Quit"];
-        [a addButtonWithTitle:uiGerman ? @"Abbrechen" : @"Cancel"].keyEquivalent = @"\033";
+        NSArray<NSString *> *tx = fsaux_quitTexts();
+        a.messageText = tx[0];
+        a.informativeText = tx[1];
+        [a addButtonWithTitle:tx[2]];
+        [a addButtonWithTitle:tx[3]].keyEquivalent = @"\033";
         // runModal resets the level, and macOS may not let a background agent
         // app come to the front: raise the alert once the modal loop runs.
         [[NSRunLoop mainRunLoop] performInModes:@[NSModalPanelRunLoopMode] block:^{
@@ -356,7 +371,7 @@ static void fsaux_ghost(NSWindow *w, BOOL on) {
         fsaux_log(m.webView.window, [NSString stringWithFormat:@"JS %@", d[@"msg"]]);
     } else if ([cmd isEqual:@"state"]) {
         monitoringRunning = [d[@"running"] boolValue];
-        uiGerman = [d[@"de"] boolValue];
+        if ([d[@"lang"] isKindOfClass:[NSString class]]) uiLang = d[@"lang"];
         fsaux_log(m.webView.window, monitoringRunning ? @"state running" : @"state stopped");
     } else if ([cmd isEqual:@"ghost"]) {
         fsaux_ghost(m.webView.window, [d[@"on"] boolValue]);

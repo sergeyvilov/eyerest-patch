@@ -237,9 +237,7 @@
   // language (exit confirmation).
   let lastState = null;
   workerInterval(() => {
-    let lang = false;
-    try { lang = JSON.parse(localStorage.getItem('settings')).global.languageCode === 'de'; } catch (e) {}
-    const st = { cmd: 'state', running: running(), de: lang };
+    const st = { cmd: 'state', running: running(), lang: lang() };
     const key = JSON.stringify(st);
     if (key !== lastState) { lastState = key; post(st); }
   }, 500);
@@ -274,8 +272,10 @@
   // picked up when the last point arrives.
   //
   // Blink: eye aspect ratio (EAR, eyelid gap / eye width) per eye. A blink
-  // is both eyes below BLINK_CLOSED of their usual openness, open again
-  // within BLINK_MAX_MS. Usual openness: slow average over open frames.
+  // is the eye(s) chosen in the app (L, R or LR = both) below BLINK_CLOSED
+  // of their usual openness, open again within BLINK_MAX_MS. Usual openness:
+  // slow average over open frames. As in the app, L is MediaPipe's left eye
+  // (points 362...) and R its right eye (points 33...).
   // Looking down: head pitch (forehead vs chin in 3D) in degrees, relative to
   // the usual pitch for this camera (30th percentile of the last 5 minutes,
   // so a camera above the screen doesn't count as "down" and long writing
@@ -293,6 +293,10 @@
   const R_EYE = [33, 160, 158, 133, 153, 144], L_EYE = [362, 385, 387, 263, 373, 380];
   let lastFrameAt = 0, lastDownAt = 0, lastSmileAt = 0, afterSmile = false, resumeAt = 0;
   let baseL = 0, baseR = 0, closedSince = 0, blinkAll = 0;
+  function eyeChoice() {
+    try { return JSON.parse(localStorage.getItem('settings')).config.eyeStatus || 'LR'; } catch (e) { return 'LR'; }
+  }
+  let eyes = eyeChoice();
   let gazeHistory = [], gazeCamera = null, secStart = 0, secPitch = 0, secIris = 0, secN = 0;
   let usualPitch = null, usualIris = null;
   let frames = 0, usableFrames = 0, tickPitch = [], tickIris = [], tickEar = [];  // per tick, for the log
@@ -347,8 +351,9 @@
     if (usable) usableFrames++;
 
     if (!baseL) { baseL = eL; baseR = eR; }
-    const closed = eL < baseL * BLINK_CLOSED && eR < baseR * BLINK_CLOSED;
-    const open = eL > baseL * BLINK_OPEN && eR > baseR * BLINK_OPEN;
+    const useL = eyes !== 'R', useR = eyes !== 'L';
+    const closed = (!useL || eL < baseL * BLINK_CLOSED) && (!useR || eR < baseR * BLINK_CLOSED);
+    const open = (!useL || eL > baseL * BLINK_OPEN) && (!useR || eR > baseR * BLINK_OPEN);
     if (closed) {
       if (!closedSince) closedSince = now;
       return;
@@ -389,6 +394,7 @@
         ' (min ' + f2(Math.min(...tickEar)) + '), usable ' + Math.round(100 * usableShare) + '%, blinks ' + blinkAll + ' detected, today ' + (today().blinks || 0) + ' counted');
     }
     frames = usableFrames = 0; tickPitch = []; tickIris = []; tickEar = []; blinkAll = 0;
+    eyes = eyeChoice();
     if (!screenOn || !running()) return;
     const d = today();
     d.track += dt;
@@ -427,33 +433,62 @@
     return (d.blinks || 0) / (d.blinkSec / 60);
   }
 
-  const de = () => {
-    try { return JSON.parse(localStorage.getItem('settings')).global.languageCode === 'de'; } catch (e) { return false; }
+  // Texts in the app's languages (settings.global.languageCode); English
+  // for anything else.
+  const lang = () => {
+    try { return JSON.parse(localStorage.getItem('settings')).global.languageCode || 'en'; } catch (e) { return 'en'; }
   };
+  const LOCALES = { en: 'en-US', de: 'de-DE', it: 'it-IT', es: 'es-ES', ru: 'ru-RU', ja: 'ja-JP', zh: 'zh-CN' };
+  const locale = () => LOCALES[lang()] || 'en-US';
   const T = {
-    stats: ['Statistics', 'Statistik'],
-    autostart: ['Run at startup', 'Beim Systemstart ausführen'],
-    approval: ['allow eyeREST in System Settings → General → Login Items', 'eyeREST unter Systemeinstellungen → Allgemein → Anmeldeobjekte erlauben'],
-    covTitle: ['Monitoring time', 'Überwachungszeit'],
-    covSub: ['share of screen time with eyeREST monitoring', 'Anteil der Bildschirmzeit mit eyeREST-Überwachung'],
-    blinkTitle: ['Blinks per minute', 'Blinzler pro Minute'],
-    blinkSub: ['spontaneous blinks while your face is found and you look at the screen; blinks right after a smile don\'t count; more is better',
-      'spontane Blinzler, solange Ihr Gesicht erkannt wird und Sie auf den Bildschirm schauen; Blinzler direkt nach einem Smiley zählen nicht; mehr ist besser'],
-    noData: ['no data', 'keine Daten'],
-    of: ['of', 'von'],
-    blinksIn: ['blinks in', 'Blinzler in'],
-    perMin: ['/min', '/min'],
-    last7: ['Last 7 days', 'Letzte 7 Tage'],
-    prev7: ['previous 7 days', 'vorherige 7 Tage'],
-    less: ['Less', 'Weniger'],
-    more: ['More', 'Mehr'],
+    stats: { en: 'Statistics', de: 'Statistik', it: 'Statistiche', es: 'Estadísticas', ru: 'Статистика', ja: '統計', zh: '统计' },
+    autostart: { en: 'Run at startup', de: 'Beim Systemstart ausführen', it: "Avvia all'accensione", es: 'Abrir al iniciar sesión', ru: 'Запускать при входе в систему', ja: 'ログイン時に起動', zh: '登录时启动' },
+    approval: {
+      en: 'allow eyeREST in System Settings → General → Login Items',
+      de: 'eyeREST unter Systemeinstellungen → Allgemein → Anmeldeobjekte erlauben',
+      it: 'consenti eyeREST in Impostazioni di Sistema → Generali → Elementi login',
+      es: 'permite eyeREST en Ajustes del Sistema → General → Ítems de inicio',
+      ru: 'разрешите eyeREST в Системных настройках → Основные → Объекты входа',
+      ja: 'システム設定 → 一般 → ログイン項目 で eyeREST を許可してください',
+      zh: '请在 系统设置 → 通用 → 登录项 中允许 eyeREST',
+    },
+    covTitle: { en: 'Monitoring time', de: 'Überwachungszeit', it: 'Tempo di monitoraggio', es: 'Tiempo de monitorización', ru: 'Время отслеживания', ja: 'モニタリング時間', zh: '监测时间' },
+    covSub: {
+      en: 'share of screen time with eyeREST monitoring',
+      de: 'Anteil der Bildschirmzeit mit eyeREST-Überwachung',
+      it: 'quota del tempo davanti allo schermo con il monitoraggio di eyeREST',
+      es: 'parte del tiempo de pantalla con eyeREST monitorizando',
+      ru: 'доля экранного времени, когда eyeREST вёл отслеживание',
+      ja: '画面使用時間のうち eyeREST がモニタリングしていた割合',
+      zh: '屏幕使用时间中 eyeREST 监测的比例',
+    },
+    blinkTitle: { en: 'Blinks per minute', de: 'Blinzler pro Minute', it: 'Battiti di ciglia al minuto', es: 'Parpadeos por minuto', ru: 'Морганий в минуту', ja: '1分あたりのまばたき', zh: '每分钟眨眼次数' },
+    blinkSub: {
+      en: "spontaneous blinks while your face is found and you look at the screen; blinks right after a smile don't count; more is better",
+      de: 'spontane Blinzler, solange Ihr Gesicht erkannt wird und Sie auf den Bildschirm schauen; Blinzler direkt nach einem Smiley zählen nicht; mehr ist besser',
+      it: 'battiti di ciglia spontanei mentre il viso è rilevato e guardi lo schermo; quelli subito dopo uno smile non contano; più è meglio',
+      es: 'parpadeos espontáneos mientras se detecta tu cara y miras la pantalla; los que siguen a una carita no cuentan; más es mejor',
+      ru: 'спонтанные моргания, пока лицо в кадре и вы смотрите на экран; моргания сразу после смайлика не считаются; чем больше, тем лучше',
+      ja: '顔が検出され画面を見ているときの自然なまばたき。スマイル表示直後のまばたきは数えません。多いほど良好です',
+      zh: '检测到面部且注视屏幕时的自然眨眼；笑脸出现后紧接着的眨眼不计入；越多越好',
+    },
+    noData: { en: 'no data', de: 'keine Daten', it: 'nessun dato', es: 'sin datos', ru: 'нет данных', ja: 'データなし', zh: '无数据' },
+    of: { en: 'of', de: 'von', it: 'su', es: 'de', ru: 'из', ja: '/', zh: '/' },
+    blinksIn: { en: 'blinks in', de: 'Blinzler in', it: 'battiti in', es: 'parpadeos en', ru: 'морганий за', ja: '回 /', zh: '次 /' },
+    perMin: { en: '/min', de: '/min', it: '/min', es: '/min', ru: '/мин', ja: '/分', zh: '/分钟' },
+    last7: { en: 'Last 7 days', de: 'Letzte 7 Tage', it: 'Ultimi 7 giorni', es: 'Últimos 7 días', ru: 'Последние 7 дней', ja: '直近7日間', zh: '最近7天' },
+    prev7: { en: 'previous 7 days', de: 'vorherige 7 Tage', it: '7 giorni precedenti', es: '7 días anteriores', ru: 'предыдущие 7 дней', ja: 'その前の7日間', zh: '之前7天' },
+    less: { en: 'Less', de: 'Weniger', it: 'Meno', es: 'Menos', ru: 'Меньше', ja: '少', zh: '少' },
+    more: { en: 'More', de: 'Mehr', it: 'Più', es: 'Más', ru: 'Больше', ja: '多', zh: '多' },
+    h: { en: 'h', de: 'h', it: 'h', es: 'h', ru: 'ч', ja: '時間', zh: '小时' },
+    min: { en: 'min', de: 'min', it: 'min', es: 'min', ru: 'мин', ja: '分', zh: '分钟' },
   };
-  const t = (k) => T[k][de() ? 1 : 0];
+  const t = (k) => T[k][lang()] || T[k].en;
   const fmtDur = (sec) => {
     const m = Math.round(sec / 60);
-    return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + pad(m % 60) + ' min';
+    return m < 60 ? m + ' ' + t('min') : Math.floor(m / 60) + ' ' + t('h') + ' ' + pad(m % 60) + ' ' + t('min');
   };
-  const fmtDate = (d) => d.toLocaleDateString(de() ? 'de-DE' : 'en-US', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+  const fmtDate = (d) => d.toLocaleDateString(locale(), { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 
   // GitHub's light-theme greens, and a blue ramp for blinks (more = better).
   const GREENS = ['#ebedf0', '#9be9a8', '#40c463', '#30a14e', '#216e39'];
@@ -493,14 +528,17 @@
       e.setAttribute('x', x); e.setAttribute('y', y); e.setAttribute('font-size', '9'); e.setAttribute('fill', '#57606a');
       e.textContent = s; svg.appendChild(e);
     };
-    const dayNames = de() ? ['Mo', 'Mi', 'Fr'] : ['Mon', 'Wed', 'Fri'];
-    [0, 2, 4].forEach((r, i) => text(0, 16 + r * (CELL + GAP) + 8, dayNames[i]));
+    // Row labels Mon/Wed/Fri: the first column starts on a Monday.
+    [0, 2, 4].forEach((r) => {
+      const d = new Date(start); d.setDate(start.getDate() + r);
+      text(0, 16 + r * (CELL + GAP) + 8, d.toLocaleDateString(locale(), { weekday: 'short' }));
+    });
     let lastMonth = -1;
     days.forEach((x, i) => {
       const col = Math.floor(i / 7), row = i % 7;
       if (row === 0 && x.date.getMonth() !== lastMonth && col < WEEKS - 2) {
         lastMonth = x.date.getMonth();
-        text(30 + col * (CELL + GAP), 9, x.date.toLocaleDateString(de() ? 'de-DE' : 'en-US', { month: 'short' }));
+        text(30 + col * (CELL + GAP), 9, x.date.toLocaleDateString(locale(), { month: 'short' }));
       }
       const r = document.createElementNS(ns, 'rect');
       r.setAttribute('x', 30 + col * (CELL + GAP)); r.setAttribute('y', 16 + row * (CELL + GAP));
@@ -602,9 +640,15 @@
     requestScreenTime();
   }
 
+  // Reopening the window shows the main view, not the statistics.
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && panel && !panel.hidden) { panel.hidden = true; hideTip(); }
+  });
+
   // The footer ("// eyeREST: Comfort Vision" ... bot icon) gets a button.
   function addStatsButton() {
-    if (document.getElementById('fsaux-stats-btn')) return;
+    const old = document.getElementById('fsaux-stats-btn');
+    if (old) { if (old.textContent !== t('stats')) old.textContent = t('stats'); return; }
     const bot = document.querySelector('svg.lucide-bot');
     if (!bot || !bot.parentElement) return;
     const b = document.createElement('button');
@@ -627,7 +671,7 @@
     const row = b && b.parentElement;
     if (!row || !row.parentElement || autostart === null || autostart === 'unsupported') return;
     let box = document.getElementById('fsaux-autostart');
-    if (box && !update) return;
+    if (box && !update && box.querySelector('span span').textContent === t('autostart')) return;
     if (!box) {
       box = document.createElement('label');
       box.id = 'fsaux-autostart';

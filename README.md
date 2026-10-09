@@ -31,9 +31,11 @@ Patches the Mac App Store build of **eyeREST** (`com.vinlemon.eyeREST`, tested w
 
 The app's face model (MediaPipe Face Landmarker, about 13 frames per second) builds 478 face points (468 face + 10 iris) per frame by pushing them one by one into an array. A wrapper around `Array.prototype.push` picks up the array when its 478th point arrives. The app's own blink rule (a score 0.2 above the average since the last blink) is not used for the statistics:
 
-- **Blink:** the eye aspect ratio (EAR = eyelid gap / eye width, points 33/160/158/133/153/144 and 362/385/387/263/373/380) drops below 70 % of its usual value in **both** eyes and comes back above 85 % within 500 ms. The usual value follows open-eye frames over about 2 s. Longer closures aren't blinks.
+- **Blink:** the eye aspect ratio (EAR = eyelid gap / eye width, points 33/160/158/133/153/144 and 362/385/387/263/373/380) drops below 70 % of its usual value in the eye(s) chosen under *Eye selection* in the app (**LR**: both; **L**: MediaPipe's left eye, points 362…; **R**: its right eye, points 33…, the same mapping the app uses) and comes back above 85 % within 500 ms. The usual value follows open-eye frames over about 2 s. Longer closures aren't blinks.
 - **Looking down:** head pitch in degrees from the forehead (10) and chin (152) points in 3D, compared with the usual pitch for the camera in use: the 30th percentile of the last 5 minutes. A camera above the screen sees you looking down all the time, so a fixed threshold doesn't work. 12° or more above the usual pitch counts as looking down. In a test, writing on paper was about +25° and the keyboard about +15°. Irises clearly lower in the eyes (0.12 eye widths) count too. Frames up to 1.5 s after looking down don't count either.
 - The log shows a `face:` line every 10 s while monitoring, with frames, pitch, iris, EAR, and detected/counted blinks.
+
+14. **All of the patch's texts follow the app's language** (English, German, Italian, Spanish, Russian, Japanese, Chinese): the statistics, the "Run at startup" checkbox, the footer link and the exit dialog. Reopening the window always shows the main view, even if the statistics were open before.
 
 ## Quick start
 
