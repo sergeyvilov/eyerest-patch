@@ -1015,7 +1015,7 @@
       note = document.createElement('div');
       note.id = 'fsaux-note';
       note.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;z-index:10;text-align:center;font:600 11px/1.3 -apple-system,sans-serif;' +
-        'color:#fff;background:rgba(207,34,46,0.85);border-radius:6px;padding:3px 6px;pointer-events:none';
+        'color:#cf222e;background:transparent;border:1.5px solid #cf222e;border-radius:6px;padding:2px 6px;pointer-events:none';
       document.body.appendChild(note);
     }
     note.textContent = NOTE[lang] || NOTE.en;
