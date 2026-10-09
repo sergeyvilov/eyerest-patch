@@ -19,7 +19,7 @@ Patches the Mac App Store build of **eyeREST** (`com.vinlemon.eyeREST`, tested w
     - **Monitoring time:** the share of the day's screen-on time with monitoring running, e.g. "63 % (4 h 12 min of 6 h 40 min)". Screen-on time comes from the macOS power log (`pmset -g log`), so time when eyeREST wasn't running counts too.
     - **Blinks per minute:** your spontaneous blink rate, e.g. "14.2/min (426 blinks in 30 min)". More is better; at a screen it typically drops well below the normal 15 to 20. Only time while your face is found and you look at the screen counts. Time spent **looking down** (writing, reading notes, the keyboard) is left out, and so are blinks right after a smile (the first blink after it, and any within 3 s), because those answer the smile instead of coming by themselves. A day needs 5 minutes of such time to get a value. See *Blink and gaze detection* below.
 
-    Below each grid are the averages for the last 7 days and the 7 days before. Recording starts when the patched app first runs, and earlier days show as "no data".
+    Below each grid are the averages for the last 7 days and the 7 days before, weighted by time and using only days that show a value themselves. Recording starts when the patched app first runs, and earlier days show as "no data".
 
 11. **"Run at startup" checkbox** (Beim Systemstart ausführen) under the start/stop button. When it's ticked, eyeREST starts at login with monitoring running. Open the window with the glasses icon's **Open**. It shows up in System Settings → General → Login Items as eyeREST. If macOS asks you to allow it there, the checkbox says so. The app's own built-in autostart can't work inside the macOS sandbox, which is why this replaces it.
 

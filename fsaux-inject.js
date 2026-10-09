@@ -566,7 +566,9 @@
       const d = new Date(); d.setDate(d.getDate() - i + 1);
       const k = dayKey(d), x = stats.days[k];
       if (!x || k < stats.since) continue;  // before recording started
-      track += x.track; screen += x.screen; blinkSec += x.blinkSec || 0; blinks += x.blinks || 0;
+      // Only days that show a value themselves (e.g. not under 5 minutes).
+      if (coverage(x) != null) { track += x.track; screen += x.screen; }
+      if (blinkRate(x) != null) { blinkSec += x.blinkSec; blinks += x.blinks || 0; }
     }
     return { cov: screen >= 60 ? Math.min(100, (100 * track) / screen) : null, rate: blinkSec >= MIN_BLINK_SEC ? blinks / (blinkSec / 60) : null };
   }
