@@ -19,6 +19,8 @@
 // 5. "Run at startup" checkbox under the start/stop button. The window starts
 //    hidden (fsaux.m) unless the camera permission or intro is still pending.
 // 6. A "4s" choice in the pop-up timer (the app offers 3/5/10/15 s).
+// 7. "Count incomplete blinks" checkbox below the eye choice; blinks detected
+//    here are also passed on to the app's smile timer (section 4).
 (() => {
   if (location.pathname !== '/' && location.pathname !== '/index.html') return;
 
@@ -272,11 +274,17 @@
   // frame (~13/s) by pushing them one by one into an array; the array is
   // picked up when the last point arrives.
   //
-  // Blink: eye aspect ratio (EAR, eyelid gap / eye width) per eye. A blink
-  // is the eye(s) chosen in the app (L, R or LR = both) below BLINK_CLOSED
-  // of their usual openness, open again within BLINK_MAX_MS. Usual openness:
-  // slow average over open frames. As in the app, L is MediaPipe's left eye
-  // (points 362...) and R its right eye (points 33...).
+  // Blink: eye aspect ratio (EAR, eyelid gap / eye width) per eye, relative
+  // to its usual openness (slow average over open frames). A blink: the eye
+  // chosen in the app (L or R) below BLINK_CLOSED, or with LR the eye that
+  // closes further below BLINK_CLOSED while the other dips below BLINK_BOTH
+  // (at an angle the camera sees one eye much more obliquely); open again
+  // (above BLINK_OPEN) within BLINK_MAX_MS. Full if it got below BLINK_FULL,
+  // else incomplete. Shallower eyelid movements are not counted: at an angle
+  // they can't be told from noise. Calibrated with 2 x 20 counted blinks
+  // (found 20 and 21, 2 false in 70 s of reading/holding the eyes open).
+  // As in the app, L is MediaPipe's left eye (points 362...), R its right
+  // eye (points 33...).
   // Looking down: head pitch (forehead vs chin in 3D) in degrees, relative to
   // the usual pitch for this camera (30th percentile of the last 5 minutes,
   // so a camera above the screen doesn't count as "down" and long writing
@@ -284,7 +292,8 @@
   // A frame counts (time and blinks) only while you are not looking down, and
   // not just after a smile (the first blink after it and any within
   // SMILE_HOLD are deliberate) or after the face was found again.
-  const BLINK_CLOSED = 0.7, BLINK_OPEN = 0.85, BLINK_MAX_MS = 500;
+  const BLINK_CLOSED = 0.55, BLINK_BOTH = 0.8, BLINK_OPEN = 0.8, BLINK_MAX_MS = 800;
+  const BLINK_FULL = 0.47;      // closed to under this share of usual openness = full blink, else incomplete
   const PITCH_DOWN = 12;        // degrees below the usual head pitch (writing: ~25, keyboard: ~15)
   const IRIS_DOWN = 0.12;       // iris drop below usual, in eye widths
   const GAZE_WINDOW = 300;      // seconds of history for the usual pitch/iris
@@ -293,7 +302,7 @@
   const GAP_HOLD = 1000;        // ms after a pause in frames (face just found again)
   const R_EYE = [33, 160, 158, 133, 153, 144], L_EYE = [362, 385, 387, 263, 373, 380];
   let lastFrameAt = 0, lastDownAt = 0, lastSmileAt = 0, afterSmile = false, resumeAt = 0;
-  let baseL = 0, baseR = 0, closedSince = 0, blinkAll = 0;
+  let baseL = 0, baseR = 0, closedSince = 0, closedMin = 1, blinkAll = 0, blinkFull = 0, passed = 0;
   function eyeChoice() {
     try { return JSON.parse(localStorage.getItem('settings')).config.eyeStatus || 'LR'; } catch (e) { return 'LR'; }
   }
@@ -304,9 +313,12 @@
 
   const P = (lm, i) => ({ x: lm[i].x * videoW, y: lm[i].y * videoH, z: lm[i].z * videoW });
   const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  // The eyelid gap is measured in 3D (MediaPipe's z), so a camera looking
+  // from below or above (lid angle) foreshortens it less than in the image.
+  const dist3 = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
   function ear(lm, idx) {
     const [p1, p2, p3, p4, p5, p6] = idx.map((i) => P(lm, i));
-    return (dist(p2, p6) + dist(p3, p5)) / (2 * dist(p1, p4));
+    return (dist3(p2, p6) + dist3(p3, p5)) / (2 * dist3(p1, p4));
   }
   function pitchDeg(lm) {
     const top = P(lm, 10), chin = P(lm, 152);  // forehead, chin
@@ -352,26 +364,88 @@
     if (usable) usableFrames++;
 
     if (!baseL) { baseL = eL; baseR = eR; }
-    const useL = eyes !== 'R', useR = eyes !== 'L';
-    const closed = (!useL || eL < baseL * BLINK_CLOSED) && (!useR || eR < baseR * BLINK_CLOSED);
-    const open = (!useL || eL > baseL * BLINK_OPEN) && (!useR || eR > baseR * BLINK_OPEN);
+    const rL = eL / baseL, rR = eR / baseR;
+    const ratio = eyes === 'L' ? rL : eyes === 'R' ? rR : Math.min(rL, rR);  // the eye that closes further
+    const other = eyes === 'LR' ? Math.max(rL, rR) : ratio;
+    const closed = ratio < BLINK_CLOSED && other < BLINK_BOTH;
+    const open = ratio > BLINK_OPEN;
     if (closed) {
-      if (!closedSince) closedSince = now;
+      if (!closedSince) { closedSince = now; closedMin = 1; }
+      closedMin = Math.min(closedMin, ratio);
       return;
     }
-    if (open) {
-      // Usual openness follows slowly (about 2 s), from open frames only.
+    if (closedSince) closedMin = Math.min(closedMin, ratio);
+    if (rL > 0.85 && rR > 0.85) {
+      // Usual openness follows slowly (about 2 s), from clearly open frames only.
       baseL += (eL - baseL) * 0.05; baseR += (eR - baseR) * 0.05;
     }
     if (!closedSince || !open) return;
     const ms = now - closedSince;
     closedSince = 0;
     if (ms > BLINK_MAX_MS) return;  // eyes closed for a while, not a blink
+    const full = closedMin < BLINK_FULL;
     blinkAll++;
+    if (full) blinkFull++;
+    passBlinkToApp(now, full);
     if (afterSmile) { afterSmile = false; return; }  // the blink that answers a smile
     if (!usable || !running()) return;
     const d = today();
     d.blinks = (d.blinks || 0) + 1;
+    if (full) d.fullBlinks = (d.fullBlinks || 0) + 1;
+  }
+
+  // The app decides when the smile appears from its own blink rule, on
+  // MediaPipe's eyeBlink blendshape scores, which it reads through
+  // Array#filter (LR) / #find (L, R) once per frame, right after the face
+  // points. Blinks detected here are passed on to it by handing it those
+  // scores as 1 (fully closed) on the next frame, which it counts as a blink,
+  // so its smile timer starts over.
+  // - "Count incomplete blinks" on (default): the app's rule keeps working;
+  //   it is replayed here, and blinks it missed (none counted within
+  //   APP_BLINK_WINDOW) are passed on.
+  // - Off: only full blinks count. The app's scores are handed to it as 0
+  //   (ignored by its rule), and only full blinks detected here are passed on.
+  const APP_JUMP = 0.2, APP_BLINK_WINDOW = 700;
+  const INCOMPLETE_KEY = 'fsaux-count-incomplete';
+  const countIncomplete = () => { try { return localStorage.getItem(INCOMPLETE_KEY) !== '0'; } catch (e) { return true; } };
+  let appValues = [], appBlinkAt = 0, passPending = false, fullOnly = !countIncomplete();
+  function passBlinkToApp(now, full) {
+    if (fullOnly ? full : now - appBlinkAt > APP_BLINK_WINDOW) passPending = true;
+  }
+  const isBlendshapes = (a) => a.length > 40 && a[0] && a[0].categoryName === '_neutral';
+  function appScore(cats) {
+    let l = 0, r = 0;
+    for (const c of cats) {
+      if (c.categoryName === 'eyeBlinkLeft') l = c.score;
+      else if (c.categoryName === 'eyeBlinkRight') r = c.score;
+    }
+    return eyes === 'L' ? l : eyes === 'R' ? r : (l + r) / 2;
+  }
+  function replayAppRule(u, now) {
+    if (!u) return;
+    appValues.push(u);
+    const mean = appValues.reduce((a, b) => a + b, 0) / appValues.length;
+    if (u > mean + APP_JUMP) { appValues = []; appBlinkAt = now; }
+  }
+  const withScore = (score) => (c) => (c && /^eyeBlink/.test(c.categoryName) ? { ...c, score } : c);
+  const handTo = (result, score) => (Array.isArray(result) ? result.map(withScore(score)) : withScore(score)(result));
+  for (const name of ['filter', 'find']) {
+    const orig = Array.prototype[name];
+    Array.prototype[name] = function () {
+      const result = orig.apply(this, arguments);
+      if (!isBlendshapes(this)) return result;
+      const now = Date.now();
+      if (passPending && (fullOnly || now - appBlinkAt > APP_BLINK_WINDOW)) {
+        passPending = false;
+        passed++;
+        replayAppRule(1, now);
+        return handTo(result, 1);
+      }
+      passPending = false;
+      if (fullOnly) return handTo(result, 0);
+      replayAppRule(appScore(this), now);
+      return result;
+    };
   }
   const origPush = Array.prototype.push;
   Array.prototype.push = function (...items) {
@@ -392,10 +466,11 @@
       const f1 = (v) => (v == null ? '-' : v.toFixed(1)), f2 = (v) => (v == null ? '-' : v.toFixed(2));
       log('face: ' + frames + ' frames, pitch ' + f1(median(tickPitch)) + ' (max ' + f1(Math.max(...tickPitch)) + ', usual ' + f1(usualPitch) +
         '), iris ' + f2(median(tickIris)) + ' (max ' + f2(Math.max(...tickIris)) + ', usual ' + f2(usualIris) + '), EAR ' + f2(median(tickEar)) +
-        ' (min ' + f2(Math.min(...tickEar)) + '), usable ' + Math.round(100 * usableShare) + '%, blinks ' + blinkAll + ' detected, today ' + (today().blinks || 0) + ' counted');
+        ' (min ' + f2(Math.min(...tickEar)) + '), usable ' + Math.round(100 * usableShare) + '%, blinks ' + blinkAll + ' detected (' + blinkFull + ' full, ' + passed + ' passed to app), today ' + (today().blinks || 0) + ' counted');
     }
-    frames = usableFrames = 0; tickPitch = []; tickIris = []; tickEar = []; blinkAll = 0;
+    frames = usableFrames = 0; tickPitch = []; tickIris = []; tickEar = []; blinkAll = 0; blinkFull = 0; passed = 0;
     eyes = eyeChoice();
+    fullOnly = !countIncomplete();
     if (!screenOn || !running()) return;
     const d = today();
     d.track += dt;
@@ -428,6 +503,11 @@
     if (!d || !d.screen || d.screen < 60) return null;
     return Math.min(100, (100 * d.track) / d.screen);
   }
+  // Share of incomplete blinks, from days that record full blinks.
+  function incompleteShare(blinks, full) {
+    return blinks > 0 && full != null ? Math.round((100 * (blinks - full)) / blinks) : null;
+  }
+  const incompleteText = (p) => (p == null ? '' : ', ' + t('incomplete').replace('{p}', p));
   const MIN_BLINK_SEC = 300;  // under 5 minutes of usable face time says nothing
   function blinkRate(d) {
     if (!d || !d.blinkSec || d.blinkSec < MIN_BLINK_SEC) return null;
@@ -465,13 +545,13 @@
     },
     blinkTitle: { en: 'Blinks per minute', de: 'Blinzler pro Minute', it: 'Battiti di ciglia al minuto', es: 'Parpadeos por minuto', ru: 'Морганий в минуту', ja: '1分あたりのまばたき', zh: '每分钟眨眼次数' },
     blinkSub: {
-      en: "spontaneous blinks while your face is found and you look at the screen; blinks right after a smile don't count; more is better",
-      de: 'spontane Blinzler, solange Ihr Gesicht erkannt wird und Sie auf den Bildschirm schauen; Blinzler direkt nach einem Smiley zählen nicht; mehr ist besser',
-      it: 'battiti di ciglia spontanei mentre il viso è rilevato e guardi lo schermo; quelli subito dopo uno smile non contano; più è meglio',
-      es: 'parpadeos espontáneos mientras se detecta tu cara y miras la pantalla; los que siguen a una carita no cuentan; más es mejor',
-      ru: 'спонтанные моргания, пока лицо в кадре и вы смотрите на экран; моргания сразу после смайлика не считаются; чем больше, тем лучше',
-      ja: '顔が検出され画面を見ているときの自然なまばたき。スマイル表示直後のまばたきは数えません。多いほど良好です',
-      zh: '检测到面部且注视屏幕时的自然眨眼；笑脸出现后紧接着的眨眼不计入；越多越好',
+      en: "spontaneous blinks while your face is found and you look at the screen; blinks right after a smile don't count; more is better. Incomplete: the eyelid closed less than 60 %",
+      de: 'spontane Blinzler, solange Ihr Gesicht erkannt wird und Sie auf den Bildschirm schauen; Blinzler direkt nach einem Smiley zählen nicht; mehr ist besser. Unvollständig: Lid weniger als 60 % geschlossen',
+      it: 'battiti di ciglia spontanei mentre il viso è rilevato e guardi lo schermo; quelli subito dopo uno smile non contano; più è meglio. Incompleti: palpebra chiusa meno del 60 %',
+      es: 'parpadeos espontáneos mientras se detecta tu cara y miras la pantalla; los que siguen a una carita no cuentan; más es mejor. Incompletos: párpado cerrado menos del 60 %',
+      ru: 'спонтанные моргания, пока лицо в кадре и вы смотрите на экран; моргания сразу после смайлика не считаются; чем больше, тем лучше. Неполные: веко закрылось меньше чем на 60 %',
+      ja: '顔が検出され画面を見ているときの自然なまばたき。スマイル表示直後のまばたきは数えません。多いほど良好です。不完全: まぶたの閉じ方が60%未満',
+      zh: '检测到面部且注视屏幕时的自然眨眼；笑脸出现后紧接着的眨眼不计入；越多越好。不完全：眼睑闭合不足60%',
     },
     noData: { en: 'no data', de: 'keine Daten', it: 'nessun dato', es: 'sin datos', ru: 'нет данных', ja: 'データなし', zh: '无数据' },
     of: { en: 'of', de: 'von', it: 'su', es: 'de', ru: 'из', ja: '/', zh: '/' },
@@ -481,6 +561,17 @@
     prev7: { en: 'previous 7 days', de: 'vorherige 7 Tage', it: '7 giorni precedenti', es: '7 días anteriores', ru: 'предыдущие 7 дней', ja: 'その前の7日間', zh: '之前7天' },
     less: { en: 'Less', de: 'Weniger', it: 'Meno', es: 'Menos', ru: 'Меньше', ja: '少', zh: '少' },
     more: { en: 'More', de: 'Mehr', it: 'Più', es: 'Más', ru: 'Больше', ja: '多', zh: '多' },
+    countIncomplete: { en: 'Count incomplete blinks', de: 'Unvollständige Blinzler zählen', it: 'Conta i battiti di ciglia incompleti', es: 'Contar parpadeos incompletos', ru: 'Учитывать неполные моргания', ja: '不完全なまばたきも数える', zh: '计入不完全眨眼' },
+    countIncompleteOff: {
+      en: 'only full blinks dismiss the smile',
+      de: 'nur vollständige Blinzler beenden den Smiley',
+      it: 'solo i battiti completi chiudono lo smile',
+      es: 'solo los parpadeos completos quitan la carita',
+      ru: 'смайлик убирают только полные моргания',
+      ja: '完全なまばたきだけがスマイルを消します',
+      zh: '只有完整眨眼才能关闭笑脸',
+    },
+    incomplete: { en: '{p}% incomplete', de: '{p} % unvollständig', it: '{p}% incompleti', es: '{p}% incompletos', ru: '{p}% неполных', ja: '不完全 {p}%', zh: '不完全 {p}%' },
     h: { en: 'h', de: 'h', it: 'h', es: 'h', ru: 'ч', ja: '時間', zh: '小时' },
     min: { en: 'min', de: 'min', it: 'min', es: 'min', ru: 'мин', ja: '分', zh: '分钟' },
   };
@@ -562,7 +653,7 @@
 
   // Average over a span of days, weighted by time: a 7-day trend line.
   function span(fromDaysAgo, toDaysAgo) {
-    let track = 0, screen = 0, blinkSec = 0, blinks = 0;
+    let track = 0, screen = 0, blinkSec = 0, blinks = 0, splitBlinks = 0, full = 0;
     for (let i = fromDaysAgo; i > toDaysAgo; i--) {
       const d = new Date(); d.setDate(d.getDate() - i + 1);
       const k = dayKey(d), x = stats.days[k];
@@ -570,8 +661,10 @@
       // Only days that show a value themselves (e.g. not under 5 minutes).
       if (coverage(x) != null) { track += x.track; screen += x.screen; }
       if (blinkRate(x) != null) { blinkSec += x.blinkSec; blinks += x.blinks || 0; }
+      if (blinkRate(x) != null && x.fullBlinks != null) { splitBlinks += x.blinks || 0; full += x.fullBlinks; }
     }
-    return { cov: screen >= 60 ? Math.min(100, (100 * track) / screen) : null, rate: blinkSec >= MIN_BLINK_SEC ? blinks / (blinkSec / 60) : null };
+    return { cov: screen >= 60 ? Math.min(100, (100 * track) / screen) : null, rate: blinkSec >= MIN_BLINK_SEC ? blinks / (blinkSec / 60) : null,
+      incomplete: incompleteShare(splitBlinks, splitBlinks ? full : null) };
   }
 
   let panel = null, tip = null;
@@ -613,13 +706,15 @@
     const now7 = span(7, 0), prev7 = span(14, 7);
     const pct = (v) => (v == null ? '—' : Math.round(v) + ' %');
     const rate = (v) => (v == null ? '—' : v.toFixed(1) + t('perMin'));
+    const rateSplit = (s) => rate(s.rate) + (s.rate != null && s.incomplete != null ? ' (' + t('incomplete').replace('{p}', s.incomplete) + ')' : '');
     body.append(
       section(t('covTitle'), t('covSub'),
         grid(coverage, GREENS, 100, (v, d) => Math.round(v) + ' % (' + fmtDur(d.track) + ' ' + t('of') + ' ' + fmtDur(d.screen) + ')'),
         t('last7') + ': ' + pct(now7.cov) + '  ·  ' + t('prev7') + ': ' + pct(prev7.cov)),
       section(t('blinkTitle'), t('blinkSub'),
-        grid(blinkRate, BLUES, 0, (v, d) => v.toFixed(1) + t('perMin') + ' (' + (d.blinks || 0) + ' ' + t('blinksIn') + ' ' + fmtDur(d.blinkSec) + ')'),
-        t('last7') + ': ' + rate(now7.rate) + '  ·  ' + t('prev7') + ': ' + rate(prev7.rate)),
+        grid(blinkRate, BLUES, 0, (v, d) => v.toFixed(1) + t('perMin') + ' (' + (d.blinks || 0) + ' ' + t('blinksIn') + ' ' + fmtDur(d.blinkSec) +
+          incompleteText(incompleteShare(d.blinks || 0, d.fullBlinks)) + ')'),
+        t('last7') + ': ' + rateSplit(now7) + '  ·  ' + t('prev7') + ': ' + rateSplit(prev7)),
     );
   }
 
@@ -690,6 +785,37 @@
   }
   new MutationObserver(() => addAutostartBox(false)).observe(document.documentElement, { childList: true, subtree: true });
   post({ cmd: 'autostart' });
+
+  // ---------- 7. "count incomplete blinks" checkbox ----------
+  // Below the eye choice (L / R / LR). See passBlinkToApp() above.
+  function addIncompleteBox() {
+    const lr = document.querySelector('[data-scope="radio-group"][data-part="item"] input[type="radio"][value="LR"]');
+    const group = lr && lr.closest('[data-part="root"]');
+    if (!group || !group.parentElement) return;
+    let box = document.getElementById('fsaux-incomplete');
+    if (!box) {
+      box = document.createElement('label');
+      box.id = 'fsaux-incomplete';
+      box.className = 'text textStyle_sm';
+      box.style.cssText = 'display:flex;flex-direction:column;gap:2px;margin-top:12px;cursor:pointer';
+      box.innerHTML = '<span style="display:flex;align-items:center;gap:6px"><input type="checkbox" style="width:14px;height:14px;cursor:pointer"><span></span></span><span style="color:#57606a;font-size:12px"></span>';
+      box.querySelector('input').addEventListener('change', (e) => {
+        try { localStorage.setItem(INCOMPLETE_KEY, e.target.checked ? '1' : '0'); } catch (err) {}
+        fullOnly = !e.target.checked;
+        log('count incomplete blinks: ' + e.target.checked);
+        addIncompleteBox();
+      });
+      group.after(box);
+    }
+    const on = countIncomplete();
+    const input = box.querySelector('input');
+    if (input.checked !== on) input.checked = on;
+    const label = box.querySelector('span span'), hint = box.lastChild;
+    if (label.textContent !== t('countIncomplete')) label.textContent = t('countIncomplete');
+    const h = on ? '' : t('countIncompleteOff');
+    if (hint.textContent !== h) hint.textContent = h;
+  }
+  new MutationObserver(addIncompleteBox).observe(document.documentElement, { childList: true, subtree: true });
 
   // ---------- 6. 4 s pop-up timer ----------
   // The app's timer buttons come from a fixed list that can't be extended,
