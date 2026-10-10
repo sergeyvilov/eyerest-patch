@@ -214,9 +214,10 @@
 
   // The app's start/stop button is very tall; a lower one leaves room for the
   // patch's additions in the fixed-size window.
+  const BIG_BUTTON_HEIGHT = '46px';  // start/stop and "Show total statistics"
   function lowerToggleButton() {
     const b = toggleButton();
-    if (b && b.style.height !== '46px') { b.style.height = '46px'; b.style.minHeight = '46px'; b.style.fontSize = '20px'; }
+    if (b && b.style.height !== BIG_BUTTON_HEIGHT) { b.style.height = BIG_BUTTON_HEIGHT; b.style.minHeight = BIG_BUTTON_HEIGHT; b.style.fontSize = '20px'; }
   }
   new MutationObserver(lowerToggleButton).observe(document.documentElement, { childList: true, subtree: true });
 
@@ -655,7 +656,7 @@
       ja: 'まぶたは下がるものの半分未満しか閉じないまばたき（開きが普段の47〜55 %にとどまる）。目の一部が覆われず、涙がうまく広がりません。不完全なまばたきが多いことは、画面作業でのドライアイのよくある原因です。少ないほど良好です。「不完全なまばたきも数える」をオフにすると、完全なまばたきだけがスマイルを消すため、完全なまばたきの練習になります。斜めから見るとまばたきは浅く見えるため、カメラの角度が悪いとこの割合は高めに出ます。',
       zh: '眼睑下垂但闭合不足一半的眨眼（开度停留在平时的47 %到55 %之间）。它们会让部分眼表暴露在外，泪液铺展不佳；不完全眨眼过多是看屏幕时眼干的常见原因。越少越好。取消勾选“计入不完全眨眼”后，只有完整眨眼才能关闭笑脸，可以训练完整眨眼。从侧面看眨眼会显得较浅，因此摄像头角度不佳时这一比例会偏高。',
     },
-    seeStats: { en: 'See statistics', de: 'Statistik ansehen', it: 'Vedi statistiche', es: 'Ver estadísticas', ru: 'Посмотреть статистику', ja: '統計を見る', zh: '查看统计' },
+    seeStats: { en: 'Show total statistics', de: 'Gesamtstatistik anzeigen', it: 'Mostra statistiche totali', es: 'Ver estadísticas totales', ru: 'Показать общую статистику', ja: '全体の統計を表示', zh: '显示总统计' },
     exportCsv: { en: 'Export CSV', de: 'Als CSV exportieren', it: 'Esporta CSV', es: 'Exportar CSV', ru: 'Экспорт в CSV', ja: 'CSVで書き出す', zh: '导出 CSV' },
     close: { en: 'Close', de: 'Schließen', it: 'Chiudi', es: 'Cerrar', ru: 'Закрыть', ja: '閉じる', zh: '关闭' },
     back: { en: 'Back', de: 'Zurück', it: 'Indietro', es: 'Atrás', ru: 'Назад', ja: '戻る', zh: '返回' },
@@ -957,7 +958,7 @@
     if (!box) {
       box = document.createElement('div');
       box.id = 'fsaux-counters';
-      box.style.cssText = 'display:grid;grid-template-columns:auto auto 1fr;align-items:center;column-gap:6px;row-gap:2px';
+      box.style.cssText = 'display:grid;grid-template-columns:auto auto;justify-content:start;align-items:center;column-gap:6px;row-gap:2px';
       // Space is tight in the fixed-size window: less gap above the block.
       if (row.parentElement.style.gap !== '6px') row.parentElement.style.gap = '6px';
       for (const k of ['total', 'full', 'part']) {
@@ -967,25 +968,24 @@
         const value = document.createElement('code');
         value.className = counter.className + ' fsaux-count';
         value.style.cssText = 'justify-self:end;min-width:3.2em;text-align:right;padding-block:0;height:22px;line-height:20px;font-size:14px';
-        const extra = document.createElement('span');
-        extra.dataset.k = k;
-        extra.style.cssText = 'display:flex;margin-left:8px';
-        if (k === 'full' && appReset) {
-          const reset = document.createElement('button');
-          reset.className = appReset.className;
-          reset.style.justifySelf = 'start';
-          reset.addEventListener('click', () => { appReset.click(); sessionTotal = 0; sessionFull = 0; updateCounters(); });
-          extra.appendChild(reset);
-        }
-        box.append(label, value, extra);
+        box.append(label, value);
       }
       row.before(box);
+      // Reset on its own line below the counters.
+      if (appReset) {
+        const reset = document.createElement('button');
+        reset.id = 'fsaux-counters-reset';
+        reset.className = appReset.className;
+        reset.style.cssText = 'align-self:flex-end;padding-inline:0;margin-top:2px';
+        reset.addEventListener('click', () => { appReset.click(); sessionTotal = 0; sessionFull = 0; updateCounters(); });
+        box.after(reset);
+      }
       updateCounters();
       addCountersInfo(box);
     }
     const names = { total: 'totalBlinks', full: 'fullBlinks', part: 'partBlinks' };
     box.querySelectorAll('span.text').forEach((l) => { const s = t(names[l.dataset.k]) + ':'; if (l.textContent !== s) l.textContent = s; });
-    const reset = box.querySelector('button');
+    const reset = document.getElementById('fsaux-counters-reset');
     if (reset && appReset && reset.textContent !== appReset.textContent) reset.textContent = appReset.textContent;
   }
   new MutationObserver(addCounters).observe(document.documentElement, { childList: true, subtree: true, characterData: true });
@@ -1042,21 +1042,37 @@
   }
   function closeCountersInfo() { if (infoDialog) infoDialog.remove(); }
 
-  // "See statistics" on its own line below the counters.
+  // The right column: the Popup section only as tall as its content, a
+  // fixed-height strip below it with "Show total statistics" centered (it
+  // lines up with the start/stop button on the left), and the Camera section
+  // taking the rest.
   function addStatsButton() {
     const old = document.getElementById('fsaux-stats-btn');
     if (old) { if (old.textContent !== t('seeStats')) old.textContent = t('seeStats'); return; }
-    const box = document.getElementById('fsaux-counters');
-    if (!box) return;
+    const selects = document.querySelectorAll('[data-scope="select"][data-part="root"]');
+    const popup = selects.length && selects[selects.length - 1].closest('[class*="bd_1px_dashed"]');
+    const col = popup && popup.parentElement;
+    if (!col) return;
+    for (const c of col.children) {
+      if (c === popup || !/bd_1px_dashed/.test(c.className)) continue;
+      c.style.height = 'auto';
+      c.style.flex = '1 1 0';
+      c.style.minHeight = '0';
+    }
+    popup.style.height = 'auto';
+    popup.style.flex = 'none';
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'flex:none;height:56px;display:flex;align-items:center;justify-content:center';
     const b = document.createElement('button');
     b.id = 'fsaux-stats-btn';
-    b.className = 'text textStyle_sm';
-    // A compact text link (a full-size button would push the panel's content
-    // out of the fixed-size window).
-    b.style.cssText = 'align-self:flex-start;margin-top:2px;padding:0;height:auto;line-height:1.2;background:none;border:none;cursor:pointer;text-decoration:underline;font-weight:600;white-space:nowrap';
+    b.className = 'button button--variant_solid button--size_md';
+    b.style.height = b.style.minHeight = BIG_BUTTON_HEIGHT;
+    b.style.paddingInline = '24px';
+    b.style.fontSize = '16px';
     b.textContent = t('seeStats');
     b.addEventListener('click', () => openStats());
-    box.after(b);
+    wrap.appendChild(b);
+    col.appendChild(wrap);
   }
   new MutationObserver(addStatsButton).observe(document.documentElement, { childList: true, subtree: true });
 
@@ -1077,7 +1093,7 @@
       box = document.createElement('label');
       box.id = 'fsaux-autostart';
       box.className = 'text textStyle_sm';
-      box.style.cssText = 'display:flex;flex-direction:column;align-items:flex-start;gap:2px;margin-top:auto;padding:0 8px 6px;cursor:pointer';
+      box.style.cssText = 'display:flex;flex-direction:column;align-items:flex-start;gap:2px;margin-top:10px;padding:0 8px 6px;cursor:pointer';
       box.innerHTML = '<span style="display:flex;align-items:center;gap:6px"><input type="checkbox" style="width:14px;height:14px;cursor:pointer"><span></span></span><span style="color:#57606a"></span>';
       box.querySelector('input').addEventListener('change', (e) => post({ cmd: 'autostart', on: e.target.checked }));
       section.style.display = 'flex';
@@ -1144,7 +1160,7 @@
       line = document.createElement('div');
       line.id = 'fsaux-quality';
       line.className = 'text textStyle_sm';
-      line.style.cssText = 'margin-top:10px;font-size:13px';
+      line.style.cssText = 'margin-top:4px;font-size:13px;line-height:1.3';
       box.after(line);
     }
     const want = '<span style="color:' + QUALITY_COLORS[quality.level] + '">●</span> ' + t('quality') + ': ' + t(quality.level) +
@@ -1165,7 +1181,7 @@
       box = document.createElement('label');
       box.id = 'fsaux-incomplete';
       box.className = 'text textStyle_sm';
-      box.style.cssText = 'display:flex;flex-direction:column;gap:2px;margin-top:12px;cursor:pointer';
+      box.style.cssText = 'display:flex;flex-direction:column;gap:2px;margin-top:6px;cursor:pointer';
       box.innerHTML = '<span style="display:flex;align-items:center;gap:6px"><input type="checkbox" style="width:14px;height:14px;cursor:pointer"><span></span></span><span style="color:#57606a;font-size:12px"></span>';
       box.querySelector('input').addEventListener('change', (e) => {
         try { localStorage.setItem(INCOMPLETE_KEY, e.target.checked ? '1' : '0'); } catch (err) {}

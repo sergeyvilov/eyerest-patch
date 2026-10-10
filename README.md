@@ -10,7 +10,7 @@ Patches the Mac App Store build of **eyeREST** (`com.vinlemon.eyeREST`, tested w
 
 - **Menu-bar only.** No Dock icon; the app lives in the menu bar (the glasses icon).
 - **Starts hidden, monitoring on.** At launch the main window stays hidden and monitoring starts by itself, even if it was stopped before quitting. The window does show at launch while the camera permission or the app's first-run intro is still pending.
-- **Run at startup** checkbox at the bottom of the Popup section. eyeREST then starts at login, and it appears in System Settings → General → Login Items. If macOS asks you to allow it there, the checkbox says so. The app's own autostart can't work inside the macOS sandbox.
+- **Run at startup** checkbox at the bottom of the Popup section, which is only as tall as its content. eyeREST then starts at login, and it appears in System Settings → General → Login Items. If macOS asks you to allow it there, the checkbox says so. The app's own autostart can't work inside the macOS sandbox.
 - **Glasses icon menu** (left or right click):
   - a non-clickable line with the **hourly rate**: blinks per minute over the last hour, or "—" with under 5 minutes of data;
   - **Open**, **Start** and **Stop** (greyed out when they don't apply);
@@ -42,12 +42,12 @@ Patches the Mac App Store build of **eyeREST** (`com.vinlemon.eyeREST`, tested w
 Below "Count your blinks here", instead of the app's single counter, there are three aligned counters: **Total blinks**, **Complete blinks** and **Incomplete blinks**. An **i** in the card's corner, like the app's own info buttons, opens a dialog explaining what each counts, how it's defined and why it matters.
 
 - Total = complete + incomplete. All three come from the patch's own detection and count since monitoring started.
-- **Reset** (in the Complete blinks row) zeroes them and the app's own counter. The statistics aren't affected.
+- **Reset** (right-aligned below the counters) zeroes them and the app's own counter. The statistics aren't affected.
 - The start/stop button is lower, so everything fits in the fixed-size window.
 
 ### Statistics
 
-**See statistics** (below the counters) opens two GitHub-style grids covering the past year, one square per day. Hovering a square shows that day's value:
+**Show total statistics** (the button below the Popup section, the same height as start/stop and level with it) opens two GitHub-style grids covering the past year, one square per day. Hovering a square shows that day's value:
 
 - **Monitoring time:** the share of the day's screen-on time with monitoring running, e.g. "63 % (4 h 12 min of 6 h 40 min)". Screen-on time comes from the macOS power log (`pmset -g log`), so time when eyeREST wasn't running counts too. Time with the screen asleep or locked isn't counted as monitoring.
 - **Blinks per minute:** all spontaneous blinks, with the share of incomplete ones, e.g. "14.2/min, 38% incomplete". More is better; at a screen the rate typically drops well below the normal 15 to 20. Only time while your face is found and you look at the screen counts. Blinks right after a smile are left out (the first one after it, and any within 3 s), because they answer the smile. A day needs 5 minutes of such time to get a value.
