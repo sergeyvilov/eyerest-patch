@@ -272,7 +272,7 @@
   // language (exit confirmation).
   let lastState = null;
   workerInterval(() => {
-    const st = { cmd: 'state', running: running(), lang: lang(), rate: hourlyRate() };
+    const st = { cmd: 'state', running: running(), lang: lang(), rate: currentRate() };
     const key = JSON.stringify(st);
     if (key !== lastState) { lastState = key; post(st); }
   }, 500);
@@ -470,7 +470,7 @@
     const d = today();
     d.blinks = (d.blinks || 0) + 1;
     if (full) d.fullBlinks = (d.fullBlinks || 0) + 1;
-    hourBucket().blinks++;
+    rateBucket().blinks++;
   }
 
   // The app decides when the smile appears from its own blink rule, on
@@ -560,25 +560,26 @@
     if (!screenOn || !running()) return;
     const d = today();
     d.track += dt;
-    if (!noFace()) { d.blinkSec = (d.blinkSec || 0) + dt * usableShare; hourBucket().sec += dt * usableShare; }
+    if (!noFace()) { d.blinkSec = (d.blinkSec || 0) + dt * usableShare; rateBucket().sec += dt * usableShare; }
     saveStats();
   }, TICK_MS);
 
-  // Blink rate over the last hour, for the menu-bar menu: per-minute buckets
+  // Current blink rate (last RATE_WINDOW minutes), for the menu-bar menu: per-minute buckets
   // of counted blinks and usable seconds (as for the statistics).
-  const hourBuckets = new Map();
-  function hourBucket() {
+  const RATE_WINDOW = 10;  // minutes
+  const rateBuckets = new Map();
+  function rateBucket() {
     const m = Math.floor(Date.now() / 60000);
-    if (!hourBuckets.has(m)) {
-      hourBuckets.set(m, { blinks: 0, sec: 0 });
-      for (const k of hourBuckets.keys()) if (k <= m - 60) hourBuckets.delete(k);
+    if (!rateBuckets.has(m)) {
+      rateBuckets.set(m, { blinks: 0, sec: 0 });
+      for (const k of rateBuckets.keys()) if (k <= m - RATE_WINDOW) rateBuckets.delete(k);
     }
-    return hourBuckets.get(m);
+    return rateBuckets.get(m);
   }
-  function hourlyRate() {
+  function currentRate() {
     const m = Math.floor(Date.now() / 60000);
     let blinks = 0, sec = 0;
-    for (const [k, b] of hourBuckets) if (k > m - 60) { blinks += b.blinks; sec += b.sec; }
+    for (const [k, b] of rateBuckets) if (k > m - RATE_WINDOW) { blinks += b.blinks; sec += b.sec; }
     // Shown as soon as there is any usable time (no minimum, unlike the statistics).
     return sec > 0 ? Math.round(blinks / (sec / 60)) : null;
   }
