@@ -300,6 +300,17 @@
   const saveStats = () => { try { localStorage.setItem(STATS_KEY, JSON.stringify(stats)); } catch (e) {} };
   const dayEntry = (k) => stats.days[k] || (stats.days[k] = { track: 0, screen: 0 });
   const today = () => dayEntry(dayKey(new Date()));
+  // The same per local hour ('YYYY-MM-DD HH', in stats.hours) for the CSV
+  // export. Monitoring and blinks are recorded per hour from stats.hoursSince
+  // on; screen time per hour comes from the power log (about a week back).
+  const hourKey = (d) => dayKey(d) + ' ' + pad(d.getHours());
+  if (!stats.hours) stats.hours = {};
+  const hourEntry = (k) => stats.hours[k] || (stats.hours[k] = { track: 0, screen: 0 });
+  const thisHour = () => {
+    const k = hourKey(new Date());
+    if (!stats.hoursSince) stats.hoursSince = k;
+    return hourEntry(k);
+  };
 
   // Spontaneous blinks and looking down, from MediaPipe's 478 face points
   // (468 face + 10 iris), which the app's face model builds every processed
@@ -470,6 +481,9 @@
     const d = today();
     d.blinks = (d.blinks || 0) + 1;
     if (full) d.fullBlinks = (d.fullBlinks || 0) + 1;
+    const h = thisHour();
+    h.blinks = (h.blinks || 0) + 1;
+    if (full) h.fullBlinks = (h.fullBlinks || 0) + 1;
     rateBucket().blinks++;
   }
 
@@ -559,8 +573,14 @@
     updateQuality();
     if (!screenOn || !running()) return;
     const d = today();
+    const h = thisHour();
     d.track += dt;
-    if (!noFace()) { d.blinkSec = (d.blinkSec || 0) + dt * usableShare; rateBucket().sec += dt * usableShare; }
+    h.track += dt;
+    if (!noFace()) {
+      d.blinkSec = (d.blinkSec || 0) + dt * usableShare;
+      h.blinkSec = (h.blinkSec || 0) + dt * usableShare;
+      rateBucket().sec += dt * usableShare;
+    }
     saveStats();
   }, TICK_MS);
 
@@ -591,14 +611,19 @@
     afterSmile = true;
   };
   window.__fsaux.screenOn = (on) => { screenOn = on; lastTick = Date.now(); };
-  window.__fsaux.screenTime = ({ first, days }) => {
+  window.__fsaux.screenTime = ({ first, firstHour, days, hours }) => {
     for (const [k, sec] of Object.entries(days)) {
       // The log only reaches back about a week; keep what older runs saw.
       const d = dayEntry(k);
       if (k > first) d.screen = sec; else d.screen = Math.max(d.screen, sec);
     }
+    for (const [k, sec] of Object.entries(hours || {})) {
+      const h = hourEntry(k);
+      if (k > firstHour) h.screen = sec; else h.screen = Math.max(h.screen, sec);
+    }
     saveStats();
     if (panel && !panel.hidden) renderStats();
+    if (exportPending) writeCsv();
   };
   const requestScreenTime = () => post({ cmd: 'screentime' });
   workerTimeout(requestScreenTime, 3000);
@@ -881,19 +906,34 @@
 
   // One row per recorded day; numbers with a decimal point, minutes rounded
   // to 0.1, empty where there's no value (like "no data" in the grids).
+  // One row per hour with screen time or monitoring. Before per-hour
+  // recording started (stats.hoursSince) only screen time is known per hour;
+  // the other columns stay empty there. Minutes rounded to 0.1.
+  // Reads the power log first, so the current hour's screen time is fresh.
+  let exportPending = false;
   function exportCsv() {
+    exportPending = true;
+    requestScreenTime();
+    workerTimeout(() => { if (exportPending) writeCsv(); }, 5000);  // in case the log can't be read
+  }
+  function writeCsv() {
+    exportPending = false;
     const r1 = (v) => (v == null ? '' : String(Math.round(v * 10) / 10));
-    const rows = [['date', 'screen_min', 'monitoring_min', 'monitoring_pct', 'blink_measured_min', 'blinks', 'complete_blinks', 'incomplete_blinks', 'blinks_per_min', 'incomplete_pct'].join(',')];
-    for (const k of Object.keys(stats.days).filter((k) => k >= stats.since).sort()) {
-      const d = stats.days[k];
-      const blinks = d.blinks || 0, full = d.fullBlinks;
+    const rows = [['hour', 'screen_min', 'monitoring_min', 'monitoring_pct', 'blink_measured_min', 'blinks', 'complete_blinks', 'incomplete_blinks', 'blinks_per_min', 'incomplete_pct'].join(',')];
+    for (const k of Object.keys(stats.hours).sort()) {
+      const h = stats.hours[k];
+      if (!h.screen && !h.track) continue;
+      const known = stats.hoursSince && k >= stats.hoursSince;
+      const blinks = h.blinks || 0, full = known ? h.fullBlinks || 0 : null, sec = h.blinkSec || 0;
       rows.push([
-        k, r1(d.screen / 60), r1(d.track / 60), r1(coverage(d)), r1((d.blinkSec || 0) / 60),
-        blinks, full == null ? '' : full, full == null ? '' : blinks - full, r1(blinkRate(d)), r1(incompleteShare(blinks, full)),
+        k + ':00', r1(h.screen / 60),
+        known ? r1(h.track / 60) : '', known && h.screen ? r1(Math.min(100, (100 * h.track) / h.screen)) : '',
+        known ? r1(sec / 60) : '', known ? blinks : '', known ? full : '', known ? blinks - full : '',
+        known && sec ? r1(blinks / (sec / 60)) : '', known ? r1(incompleteShare(blinks, full)) : '',
       ].join(','));
     }
     post({ cmd: 'export', name: 'eyerest-statistics-' + dayKey(new Date()) + '.csv', data: rows.join('\n') + '\n' });
-    log('export: ' + (rows.length - 1) + ' days');
+    log('export: ' + (rows.length - 1) + ' hours');
   }
 
   function openStats() {

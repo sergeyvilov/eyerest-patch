@@ -467,16 +467,25 @@ static NSDictionary *fsaux_screenTimeFromLog(NSString *log) {
     NSDateFormatter *dayFmt = [NSDateFormatter new];
     dayFmt.locale = fmt.locale;
     dayFmt.dateFormat = @"yyyy-MM-dd";
+    NSDateFormatter *hourFmt = [NSDateFormatter new];
+    hourFmt.locale = fmt.locale;
+    hourFmt.dateFormat = @"yyyy-MM-dd HH";
     NSCalendar *cal = [NSCalendar currentCalendar];
     NSMutableDictionary<NSString *, NSNumber *> *days = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSString *, NSNumber *> *hours = [NSMutableDictionary dictionary];
 
+    // Split each screen-on interval at hour boundaries (day boundaries are
+    // hour boundaries too) and add it up per local day and per local hour.
     __block NSDate *onSince = nil, *first = nil;
     void (^addRange)(NSDate *, NSDate *) = ^(NSDate *a, NSDate *b) {
         while ([a compare:b] == NSOrderedAscending) {
-            NSDate *next = [cal startOfDayForDate:[cal dateByAddingUnit:NSCalendarUnitDay value:1 toDate:a options:0]];
+            NSDateComponents *c = [cal components:NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay | NSCalendarUnitHour fromDate:a];
+            NSDate *next = [cal dateByAddingUnit:NSCalendarUnitHour value:1 toDate:[cal dateFromComponents:c] options:0];
             NSDate *end = [next compare:b] == NSOrderedAscending ? next : b;
-            NSString *k = [dayFmt stringFromDate:a];
-            days[k] = @(days[k].doubleValue + [end timeIntervalSinceDate:a]);
+            NSTimeInterval sec = [end timeIntervalSinceDate:a];
+            NSString *d = [dayFmt stringFromDate:a], *h = [hourFmt stringFromDate:a];
+            days[d] = @(days[d].doubleValue + sec);
+            hours[h] = @(hours[h].doubleValue + sec);
             a = end;
         }
     };
@@ -490,7 +499,7 @@ static NSDictionary *fsaux_screenTimeFromLog(NSString *log) {
     }
     if (onSince) addRange(onSince, [NSDate date]);
     if (!first) return nil;
-    return @{@"first": [dayFmt stringFromDate:first], @"days": days};
+    return @{@"first": [dayFmt stringFromDate:first], @"firstHour": [hourFmt stringFromDate:first], @"days": days, @"hours": hours};
 }
 
 static void fsaux_sendScreenTime(void) {
