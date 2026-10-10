@@ -1001,21 +1001,23 @@
   window.__fsaux.autostartState = (st) => { autostart = st; addAutostartBox(true); };
 
   function addAutostartBox(update) {
-    const b = toggleButton();
-    const row = b && b.parentElement;
-    if (!row || autostart === null || autostart === 'unsupported') return;
+    // At the bottom of the Popup section (the dashed box around the page's
+    // last select, "Popup Active Selector").
+    const selects = document.querySelectorAll('[data-scope="select"][data-part="root"]');
+    const section = selects.length && selects[selects.length - 1].closest('[class*="bd_1px_dashed"]');
+    if (!section || autostart === null || autostart === 'unsupported') return;
     let box = document.getElementById('fsaux-autostart');
     if (box && !update && box.querySelector('span span').textContent === t('autostart')) return;
     if (!box) {
       box = document.createElement('label');
       box.id = 'fsaux-autostart';
-      box.className = 'text textStyle_xs';
-      // Next to the start/stop button (below it there's no room left).
-      box.style.cssText = 'display:flex;flex-direction:column;align-items:flex-start;gap:2px;margin-left:18px;cursor:pointer;max-width:200px';
+      box.className = 'text textStyle_sm';
+      box.style.cssText = 'display:flex;flex-direction:column;align-items:flex-start;gap:2px;margin-top:auto;padding:0 8px 6px;cursor:pointer';
       box.innerHTML = '<span style="display:flex;align-items:center;gap:6px"><input type="checkbox" style="width:14px;height:14px;cursor:pointer"><span></span></span><span style="color:#57606a"></span>';
       box.querySelector('input').addEventListener('change', (e) => post({ cmd: 'autostart', on: e.target.checked }));
-      row.style.alignItems = 'center';
-      row.appendChild(box);
+      section.style.display = 'flex';
+      section.style.flexDirection = 'column';
+      section.appendChild(box);
     }
     box.querySelector('input').checked = autostart === 'on' || autostart === 'approval';
     box.querySelector('span span').textContent = t('autostart');

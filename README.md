@@ -21,7 +21,7 @@ Patches the Mac App Store build of **eyeREST** (`com.vinlemon.eyeREST`, tested w
 
     Below each grid are the averages for the last 7 days and the 7 days before, weighted by time and using only days that show a value themselves. Recording starts when the patched app first runs, and earlier days show as "no data".
 
-11. **"Run at startup" checkbox** (Beim Systemstart ausführen) under the start/stop button. When it's ticked, eyeREST starts at login with monitoring running. Open the window with the glasses icon's **Open**. It shows up in System Settings → General → Login Items as eyeREST. If macOS asks you to allow it there, the checkbox says so. The app's own built-in autostart can't work inside the macOS sandbox, which is why this replaces it.
+11. **"Run at startup" checkbox** (Beim Systemstart ausführen) at the bottom of the Popup section. When it's ticked, eyeREST starts at login with monitoring running. Open the window with the glasses icon's **Open**. It shows up in System Settings → General → Login Items as eyeREST. If macOS asks you to allow it there, the checkbox says so. The app's own built-in autostart can't work inside the macOS sandbox, which is why this replaces it.
 
 12. **The main window stays hidden at launch.** eyeREST starts straight into the menu bar with monitoring running. Open the window with the glasses icon's **Open**, or by opening eyeREST again (Finder, Spotlight, Launchpad) while it's running. It does show at launch while the camera permission or the app's first-run intro is still pending.
 
@@ -46,7 +46,7 @@ The app's face model (MediaPipe Face Landmarker, about 13 frames per second) bui
 17. **"Any" in the eye selection** (next to L / R / LR): a blink counts when either eye closes. Best when the camera sees you at an angle and one eye looks much smaller. Choosing it reloads the app's page, like the 4s timer.
 18. **Detection quality** below the eye selection: good, fair or poor, with a hint when it isn't good. When it stays poor for a minute, the smile shows "Adjust the camera angle" underneath.
 
-19. **Blink counters** below "Count your blinks here", instead of the app's single counter: **Total blinks**, **Complete blinks** and **Incomplete blinks**, aligned, each with a **?** that explains on hover what it counts, how it's defined and why it matters. Total = complete + incomplete, all from the patch's own detection, since monitoring started. The app's own number also includes blinks its own rule found, so it wouldn't add up. **Reset** (in the Complete blinks row) zeroes these counters and the app's own counter, not the statistics. The start/stop button is lower, with **Run at startup** next to it, so everything fits in the fixed-size window.
+19. **Blink counters** below "Count your blinks here", instead of the app's single counter: **Total blinks**, **Complete blinks** and **Incomplete blinks**, aligned, each with a **?** that explains on hover what it counts, how it's defined and why it matters. Total = complete + incomplete, all from the patch's own detection, since monitoring started. The app's own number also includes blinks its own rule found, so it wouldn't add up. **Reset** (in the Complete blinks row) zeroes these counters and the app's own counter, not the statistics. The start/stop button is lower, so everything fits in the fixed-size window.
 
 ## Quick start
 
