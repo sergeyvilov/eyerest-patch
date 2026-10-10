@@ -212,6 +212,14 @@
     if (b && b.contains(e.target)) log(running() ? 'user stop' : 'user start');
   }, true);
 
+  // The app's start/stop button is very tall; a lower one leaves room for the
+  // patch's additions in the fixed-size window.
+  function lowerToggleButton() {
+    const b = toggleButton();
+    if (b && b.style.height !== '46px') { b.style.height = '46px'; b.style.minHeight = '46px'; b.style.fontSize = '20px'; }
+  }
+  new MutationObserver(lowerToggleButton).observe(document.documentElement, { childList: true, subtree: true });
+
   function start() {
     const b = toggleButton();
     if (running() || !b || b.disabled) return false;
@@ -242,7 +250,7 @@
   // language (exit confirmation).
   let lastState = null;
   workerInterval(() => {
-    const st = { cmd: 'state', running: running(), lang: lang() };
+    const st = { cmd: 'state', running: running(), lang: lang(), rate: hourlyRate() };
     const key = JSON.stringify(st);
     if (key !== lastState) { lastState = key; post(st); }
   }, 500);
@@ -305,6 +313,7 @@
   const GAP_HOLD = 1000;        // ms after a pause in frames (face just found again)
   const R_EYE = [33, 160, 158, 133, 153, 144], L_EYE = [362, 385, 387, 263, 373, 380];
   let lastFrameAt = 0, lastDownAt = 0, lastSmileAt = 0, afterSmile = false, resumeAt = 0;
+  let sessionTotal = 0, sessionFull = 0;  // shown below the app's blink counter, since monitoring started
   let baseL = 0, baseR = 0, closedSince = 0, closedMin = 1, blinkAll = 0, blinkFull = 0, passed = 0;
   function eyeChoice() {
     try { return JSON.parse(localStorage.getItem('settings')).config.eyeStatus || 'LR'; } catch (e) { return 'LR'; }
@@ -432,12 +441,14 @@
     const full = closedMin < BLINK_FULL;
     blinkAll++;
     if (full) blinkFull++;
+    if (running()) { sessionTotal++; if (full) sessionFull++; updateCounters(); }
     passBlinkToApp(now, full);
     if (afterSmile) { afterSmile = false; return; }  // the blink that answers a smile
     if (!usable || !running()) return;
     const d = today();
     d.blinks = (d.blinks || 0) + 1;
     if (full) d.fullBlinks = (d.fullBlinks || 0) + 1;
+    hourBucket().blinks++;
   }
 
   // The app decides when the smile appears from its own blink rule, on
@@ -527,9 +538,27 @@
     if (!screenOn || !running()) return;
     const d = today();
     d.track += dt;
-    if (!noFace()) d.blinkSec = (d.blinkSec || 0) + dt * usableShare;
+    if (!noFace()) { d.blinkSec = (d.blinkSec || 0) + dt * usableShare; hourBucket().sec += dt * usableShare; }
     saveStats();
   }, TICK_MS);
+
+  // Blink rate over the last hour, for the menu-bar menu: per-minute buckets
+  // of counted blinks and usable seconds (as for the statistics).
+  const hourBuckets = new Map();
+  function hourBucket() {
+    const m = Math.floor(Date.now() / 60000);
+    if (!hourBuckets.has(m)) {
+      hourBuckets.set(m, { blinks: 0, sec: 0 });
+      for (const k of hourBuckets.keys()) if (k <= m - 60) hourBuckets.delete(k);
+    }
+    return hourBuckets.get(m);
+  }
+  function hourlyRate() {
+    const m = Math.floor(Date.now() / 60000);
+    let blinks = 0, sec = 0;
+    for (const [k, b] of hourBuckets) if (k > m - 60) { blinks += b.blinks; sec += b.sec; }
+    return sec >= MIN_BLINK_SEC ? Math.round((10 * blinks) / (sec / 60)) / 10 : null;
+  }
 
   // Every time the smile appears (fsaux.m), except the no-face smile.
   window.__fsaux.smileShown = () => {
@@ -575,7 +604,38 @@
   const LOCALES = { en: 'en-US', de: 'de-DE', it: 'it-IT', es: 'es-ES', ru: 'ru-RU', ja: 'ja-JP', zh: 'zh-CN' };
   const locale = () => LOCALES[lang()] || 'en-US';
   const T = {
+    totalBlinks: { en: 'Total blinks', de: 'Blinzler gesamt', it: 'Battiti totali', es: 'Parpadeos totales', ru: 'Всего морганий', ja: 'まばたき合計', zh: '眨眼总数' },
+    fullBlinks: { en: 'Complete blinks', de: 'Vollständige Blinzler', it: 'Battiti completi', es: 'Parpadeos completos', ru: 'Полные моргания', ja: '完全なまばたき', zh: '完整眨眼' },
+    partBlinks: { en: 'Incomplete blinks', de: 'Unvollständige Blinzler', it: 'Battiti incompleti', es: 'Parpadeos incompletos', ru: 'Неполные моргания', ja: '不完全なまばたき', zh: '不完全眨眼' },
+    totalInfo: {
+      en: 'All blinks since monitoring started: complete + incomplete. A blink counts when the eyelid gap drops below 55 % of its usual size and opens again within 0.8 s. Why it matters: each blink renews the tear film. At a screen people blink much less often (from about 15–20 to 5–7 per minute), so the eyes dry out and tire.',
+      de: 'Alle Blinzler seit dem Start der Überwachung: vollständige + unvollständige. Ein Blinzler zählt, wenn der Lidspalt unter 55 % seiner üblichen Größe fällt und sich innerhalb von 0,8 s wieder öffnet. Warum wichtig: Jeder Blinzler erneuert den Tränenfilm. Am Bildschirm blinzelt man viel seltener (von etwa 15–20 auf 5–7 pro Minute), die Augen trocknen aus und ermüden.',
+      it: "Tutti i battiti dall'avvio del monitoraggio: completi + incompleti. Un battito conta quando la fessura palpebrale scende sotto il 55 % della sua ampiezza abituale e si riapre entro 0,8 s. Perché è importante: ogni battito rinnova il film lacrimale. Davanti allo schermo si sbatte le palpebre molto meno (da circa 15–20 a 5–7 al minuto), così gli occhi si seccano e si affaticano.",
+      es: 'Todos los parpadeos desde que empezó la monitorización: completos + incompletos. Un parpadeo cuenta cuando la abertura del párpado baja del 55 % de su tamaño habitual y se vuelve a abrir en menos de 0,8 s. Por qué importa: cada parpadeo renueva la película lagrimal. Frente a la pantalla se parpadea mucho menos (de unos 15–20 a 5–7 por minuto), y los ojos se secan y se cansan.',
+      ru: 'Все моргания с начала отслеживания: полные + неполные. Моргание засчитывается, когда глазная щель сужается до менее чем 55 % обычной и снова открывается в течение 0,8 с. Почему это важно: каждое моргание обновляет слёзную плёнку. За экраном моргают гораздо реже (примерно с 15–20 до 5–7 раз в минуту), и глаза сохнут и устают.',
+      ja: 'モニタリング開始からのすべてのまばたき（完全＋不完全）。まぶたの開きが普段の55 %未満になり、0.8秒以内に再び開くとまばたきとして数えます。重要な理由：まばたきのたびに涙の膜が新しくなります。画面を見ているとまばたきが大きく減り（1分あたり約15〜20回から5〜7回）、目が乾いて疲れます。',
+      zh: '自开始监测以来的所有眨眼：完整＋不完全。当眼睑开度降到平时的55 %以下并在0.8秒内重新睁开时，计为一次眨眼。为什么重要：每次眨眼都会更新泪膜。看屏幕时眨眼次数大幅减少（从每分钟约15–20次降到5–7次），眼睛会变干、疲劳。',
+    },
+    fullInfo: {
+      en: 'Blinks in which the eyelid closes more than halfway (the gap drops below 47 % of its usual size). A complete blink spreads the tear film over the whole eye and pumps fresh oil from the eyelid glands, which keeps tears from evaporating.',
+      de: 'Blinzler, bei denen sich das Lid mehr als zur Hälfte schließt (der Lidspalt fällt unter 47 % seiner üblichen Größe). Ein vollständiger Blinzler verteilt den Tränenfilm über das ganze Auge und pumpt frisches Öl aus den Liddrüsen, das die Tränen vor dem Verdunsten schützt.',
+      it: "Battiti in cui la palpebra si chiude più che a metà (la fessura scende sotto il 47 % dell'ampiezza abituale). Un battito completo distribuisce il film lacrimale su tutto l'occhio e spreme olio fresco dalle ghiandole palpebrali, che impedisce alle lacrime di evaporare.",
+      es: 'Parpadeos en los que el párpado se cierra más de la mitad (la abertura baja del 47 % de su tamaño habitual). Un parpadeo completo reparte la película lagrimal por todo el ojo y saca aceite fresco de las glándulas del párpado, que evita que las lágrimas se evaporen.',
+      ru: 'Моргания, при которых веко закрывается больше чем наполовину (щель сужается до менее чем 47 % обычной). Полное моргание распределяет слёзную плёнку по всему глазу и выдавливает свежий липидный секрет из желёз век, который не даёт слезе испаряться.',
+      ja: 'まぶたが半分以上閉じるまばたき（開きが普段の47 %未満になる）。完全なまばたきは涙の膜を目全体に広げ、まぶたの腺から新しい油分を押し出し、涙の蒸発を防ぎます。',
+      zh: '眼睑闭合超过一半的眨眼（开度降到平时的47 %以下）。完整眨眼能把泪膜铺满整个眼表，并从睑板腺挤出新鲜油脂，防止泪液蒸发。',
+    },
+    partInfo: {
+      en: 'Blinks in which the eyelid moves down but closes less than halfway (the gap stays between 47 % and 55 % of its usual size). They leave part of the eye uncovered and spread the tears poorly; many incomplete blinks are a common cause of dry eyes at screens. Fewer is better. Unchecking "Count incomplete blinks" makes only complete blinks dismiss the smile, which trains complete blinking. Seen at an angle, blinks look shallower, so with a poor camera angle this share is too high.',
+      de: 'Blinzler, bei denen das Lid zwar herabsinkt, sich aber weniger als zur Hälfte schließt (der Lidspalt bleibt zwischen 47 % und 55 % seiner üblichen Größe). Sie lassen einen Teil des Auges unbedeckt und verteilen die Tränen schlecht; viele unvollständige Blinzler sind eine häufige Ursache trockener Augen am Bildschirm. Weniger ist besser. Ohne Häkchen bei „Unvollständige Blinzler zählen“ beenden nur vollständige Blinzler den Smiley, das trainiert vollständiges Blinzeln. Von schräg gesehen wirken Blinzler flacher; bei schlechtem Kamerawinkel ist dieser Anteil daher zu hoch.',
+      it: "Battiti in cui la palpebra scende ma si chiude meno che a metà (la fessura resta tra il 47 % e il 55 % dell'ampiezza abituale). Lasciano scoperta una parte dell'occhio e distribuiscono male le lacrime; molti battiti incompleti sono una causa frequente di occhi secchi davanti allo schermo. Meno è meglio. Togliendo la spunta da «Conta i battiti di ciglia incompleti» solo i battiti completi chiudono lo smile, il che allena a battere le palpebre completamente. Visti di lato i battiti sembrano meno profondi: con un angolo della fotocamera sfavorevole questa quota risulta troppo alta.",
+      es: 'Parpadeos en los que el párpado baja pero se cierra menos de la mitad (la abertura se queda entre el 47 % y el 55 % de su tamaño habitual). Dejan parte del ojo descubierta y reparten mal las lágrimas; muchos parpadeos incompletos son una causa frecuente de ojo seco frente a la pantalla. Menos es mejor. Al desmarcar «Contar parpadeos incompletos», solo los parpadeos completos quitan la carita, lo que entrena a parpadear por completo. Vistos de lado, los parpadeos parecen menos profundos, así que con un mal ángulo de cámara esta proporción sale demasiado alta.',
+      ru: 'Моргания, при которых веко опускается, но закрывается меньше чем наполовину (щель остаётся между 47 % и 55 % обычной). Они оставляют часть глаза открытой и плохо распределяют слезу; частые неполные моргания — распространённая причина сухости глаз за экраном. Чем меньше, тем лучше. Если снять галочку «Учитывать неполные моргания», смайлик будут убирать только полные моргания — это тренирует полное моргание. Под углом моргания выглядят менее глубокими, поэтому при плохом угле камеры эта доля завышена.',
+      ja: 'まぶたは下がるものの半分未満しか閉じないまばたき（開きが普段の47〜55 %にとどまる）。目の一部が覆われず、涙がうまく広がりません。不完全なまばたきが多いことは、画面作業でのドライアイのよくある原因です。少ないほど良好です。「不完全なまばたきも数える」をオフにすると、完全なまばたきだけがスマイルを消すため、完全なまばたきの練習になります。斜めから見るとまばたきは浅く見えるため、カメラの角度が悪いとこの割合は高めに出ます。',
+      zh: '眼睑下垂但闭合不足一半的眨眼（开度停留在平时的47 %到55 %之间）。它们会让部分眼表暴露在外，泪液铺展不佳；不完全眨眼过多是看屏幕时眼干的常见原因。越少越好。取消勾选“计入不完全眨眼”后，只有完整眨眼才能关闭笑脸，可以训练完整眨眼。从侧面看眨眼会显得较浅，因此摄像头角度不佳时这一比例会偏高。',
+    },
     seeStats: { en: 'See statistics', de: 'Statistik ansehen', it: 'Vedi statistiche', es: 'Ver estadísticas', ru: 'Посмотреть статистику', ja: '統計を見る', zh: '查看统计' },
+    exportCsv: { en: 'Export CSV', de: 'Als CSV exportieren', it: 'Esporta CSV', es: 'Exportar CSV', ru: 'Экспорт в CSV', ja: 'CSVで書き出す', zh: '导出 CSV' },
     back: { en: 'Back', de: 'Zurück', it: 'Indietro', es: 'Atrás', ru: 'Назад', ja: '戻る', zh: '返回' },
     autostart: { en: 'Run at startup', de: 'Beim Systemstart ausführen', it: "Avvia all'accensione", es: 'Abrir al iniciar sesión', ru: 'Запускать при входе в систему', ja: 'ログイン時に起動', zh: '登录时启动' },
     approval: {
@@ -599,13 +659,13 @@
     },
     blinkTitle: { en: 'Blinks per minute', de: 'Blinzler pro Minute', it: 'Battiti di ciglia al minuto', es: 'Parpadeos por minuto', ru: 'Морганий в минуту', ja: '1分あたりのまばたき', zh: '每分钟眨眼次数' },
     blinkSub: {
-      en: "spontaneous blinks while your face is found and you look at the screen; blinks right after a smile don't count; more is better. Incomplete: the eyelid closed less than 60 %",
-      de: 'spontane Blinzler, solange Ihr Gesicht erkannt wird und Sie auf den Bildschirm schauen; Blinzler direkt nach einem Smiley zählen nicht; mehr ist besser. Unvollständig: Lid weniger als 60 % geschlossen',
-      it: 'battiti di ciglia spontanei mentre il viso è rilevato e guardi lo schermo; quelli subito dopo uno smile non contano; più è meglio. Incompleti: palpebra chiusa meno del 60 %',
-      es: 'parpadeos espontáneos mientras se detecta tu cara y miras la pantalla; los que siguen a una carita no cuentan; más es mejor. Incompletos: párpado cerrado menos del 60 %',
-      ru: 'спонтанные моргания, пока лицо в кадре и вы смотрите на экран; моргания сразу после смайлика не считаются; чем больше, тем лучше. Неполные: веко закрылось меньше чем на 60 %',
-      ja: '顔が検出され画面を見ているときの自然なまばたき。スマイル表示直後のまばたきは数えません。多いほど良好です。不完全: まぶたの閉じ方が60%未満',
-      zh: '检测到面部且注视屏幕时的自然眨眼；笑脸出现后紧接着的眨眼不计入；越多越好。不完全：眼睑闭合不足60%',
+      en: "spontaneous blinks while your face is found and you look at the screen; blinks right after a smile don't count; more is better. Incomplete: the eyelid closed less than 53 %",
+      de: 'spontane Blinzler, solange Ihr Gesicht erkannt wird und Sie auf den Bildschirm schauen; Blinzler direkt nach einem Smiley zählen nicht; mehr ist besser. Unvollständig: Lid weniger als 53 % geschlossen',
+      it: 'battiti di ciglia spontanei mentre il viso è rilevato e guardi lo schermo; quelli subito dopo uno smile non contano; più è meglio. Incompleti: palpebra chiusa meno del 53 %',
+      es: 'parpadeos espontáneos mientras se detecta tu cara y miras la pantalla; los que siguen a una carita no cuentan; más es mejor. Incompletos: párpado cerrado menos del 53 %',
+      ru: 'спонтанные моргания, пока лицо в кадре и вы смотрите на экран; моргания сразу после смайлика не считаются; чем больше, тем лучше. Неполные: веко закрылось меньше чем на 53 %',
+      ja: '顔が検出され画面を見ているときの自然なまばたき。スマイル表示直後のまばたきは数えません。多いほど良好です。不完全: まぶたの閉じ方が53%未満',
+      zh: '检测到面部且注视屏幕时的自然眨眼；笑脸出现后紧接着的眨眼不计入；越多越好。不完全：眼睑闭合不足53%',
     },
     noData: { en: 'no data', de: 'keine Daten', it: 'nessun dato', es: 'sin datos', ru: 'нет данных', ja: 'データなし', zh: '无数据' },
     of: { en: 'of', de: 'von', it: 'su', es: 'de', ru: 'из', ja: '/', zh: '/' },
@@ -744,18 +804,22 @@
   }
 
   let panel = null, tip = null;
-  function showTip(target, s) {
+  function showTip(target, s, wrap) {
     if (!tip) {
       tip = document.createElement('div');
       tip.style.cssText = 'position:fixed;z-index:1001;pointer-events:none;background:#24292f;color:#fff;font-size:11px;padding:5px 8px;border-radius:6px;white-space:nowrap';
       document.body.appendChild(tip);
     }
+    tip.style.whiteSpace = wrap ? 'normal' : 'nowrap';
+    tip.style.maxWidth = wrap ? '300px' : 'none';
+    tip.style.lineHeight = wrap ? '1.4' : 'normal';
     tip.textContent = s;
     tip.hidden = false;
     const r = target.getBoundingClientRect();
     const w = tip.offsetWidth;
     tip.style.left = Math.max(4, Math.min(innerWidth - w - 4, r.left + r.width / 2 - w / 2)) + 'px';
-    tip.style.top = (r.top - tip.offsetHeight - 6) + 'px';
+    const above = r.top - tip.offsetHeight - 6;
+    tip.style.top = (above >= 4 ? above : r.bottom + 6) + 'px';
   }
   function hideTip() { if (tip) tip.hidden = true; }
 
@@ -793,6 +857,23 @@
     );
   }
 
+  // One row per recorded day; numbers with a decimal point, minutes rounded
+  // to 0.1, empty where there's no value (like "no data" in the grids).
+  function exportCsv() {
+    const r1 = (v) => (v == null ? '' : String(Math.round(v * 10) / 10));
+    const rows = [['date', 'screen_min', 'monitoring_min', 'monitoring_pct', 'blink_measured_min', 'blinks', 'complete_blinks', 'incomplete_blinks', 'blinks_per_min', 'incomplete_pct'].join(',')];
+    for (const k of Object.keys(stats.days).filter((k) => k >= stats.since).sort()) {
+      const d = stats.days[k];
+      const blinks = d.blinks || 0, full = d.fullBlinks;
+      rows.push([
+        k, r1(d.screen / 60), r1(d.track / 60), r1(coverage(d)), r1((d.blinkSec || 0) / 60),
+        blinks, full == null ? '' : full, full == null ? '' : blinks - full, r1(blinkRate(d)), r1(incompleteShare(blinks, full)),
+      ].join(','));
+    }
+    post({ cmd: 'export', name: 'eyerest-statistics-' + dayKey(new Date()) + '.csv', data: rows.join('\n') + '\n' });
+    log('export: ' + (rows.length - 1) + ' days');
+  }
+
   function openStats() {
     if (!panel) {
       panel = document.createElement('div');
@@ -805,13 +886,21 @@
       back.className = 'button button--variant_solid button--size_md';
       back.style.cssText = 'position:absolute;right:18px;bottom:16px';
       back.addEventListener('click', () => { panel.hidden = true; hideTip(); });
+      const exp = document.createElement('button');
+      exp.id = 'fsaux-stats-export';
+      exp.className = 'button button--variant_outline button--size_md';
+      exp.style.cssText = 'position:absolute;bottom:16px';
+      exp.addEventListener('click', exportCsv);
       const body = document.createElement('div');
       body.className = 'fsaux-stats-body';
-      panel.append(body, back);
+      panel.append(body, exp, back);
       document.body.appendChild(panel);
     }
     panel.hidden = false;
     panel.querySelector('#fsaux-stats-back').textContent = t('back');
+    const exp = panel.querySelector('#fsaux-stats-export'), back = panel.querySelector('#fsaux-stats-back');
+    exp.textContent = t('exportCsv');
+    exp.style.right = (18 + back.offsetWidth + 10) + 'px';
     renderStats();
     requestScreenTime();
   }
@@ -821,22 +910,88 @@
     if (!document.hidden && panel && !panel.hidden) { panel.hidden = true; hideTip(); }
   });
 
-  // "See statistics" below the app's blink counter ("Blinks: N  Reset").
+  // Three counters instead of the app's "Blinks: N": total, complete and
+  // incomplete blinks as detected here, since monitoring started (the app's
+  // own count also includes its own rule's detections, so it wouldn't add
+  // up). The app's row (counter + Reset) is hidden; this block's Reset clicks
+  // the app's Reset and zeroes these counters. Each has a "?" with an
+  // explanation on hover.
+  function updateCounters() {
+    const box = document.getElementById('fsaux-counters');
+    if (!box) return;
+    const vals = [sessionTotal, sessionFull, sessionTotal - sessionFull];
+    box.querySelectorAll('code').forEach((c, i) => { const v = String(vals[i]); if (c.textContent !== v) c.textContent = v; });
+  }
+  let wasRunning = false;
+  workerInterval(() => {
+    const r = running();
+    if (r && !wasRunning) { sessionTotal = 0; sessionFull = 0; updateCounters(); }
+    wasRunning = r;
+  }, 500);
+  function addCounters() {
+    const counter = document.querySelector('.alert__description code:not(.fsaux-count)');
+    const row = counter && counter.parentElement;
+    if (!row || !row.parentElement) return;
+    const appReset = row.querySelector('button');
+    if (row.style.display !== 'none') row.style.display = 'none';
+    let box = document.getElementById('fsaux-counters');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'fsaux-counters';
+      box.style.cssText = 'display:grid;grid-template-columns:auto auto auto 1fr;align-items:center;column-gap:6px;row-gap:2px';
+      // Space is tight in the fixed-size window: less gap above the block.
+      if (row.parentElement.style.gap !== '6px') row.parentElement.style.gap = '6px';
+      for (const k of ['total', 'full', 'part']) {
+        const label = document.createElement('span');
+        label.className = 'text textStyle_sm';
+        label.dataset.k = k;
+        const value = document.createElement('code');
+        value.className = counter.className + ' fsaux-count';
+        value.style.cssText = 'justify-self:end;min-width:3.2em;text-align:right;padding-block:0;height:22px;line-height:20px;font-size:14px';
+        const help = document.createElement('span');
+        help.textContent = '?';
+        help.dataset.k = k;
+        help.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;' +
+          'border:1px solid #8c959f;color:#57606a;font-size:10px;font-weight:600;cursor:help;user-select:none';
+        help.addEventListener('mouseenter', () => showTip(help, t(k + 'Info'), true));
+        help.addEventListener('mouseleave', hideTip);
+        const extra = document.createElement('span');
+        extra.dataset.k = k;
+        extra.style.cssText = 'display:flex';
+        if (k === 'full' && appReset) {
+          const reset = document.createElement('button');
+          reset.className = appReset.className;
+          reset.style.justifySelf = 'start';
+          reset.addEventListener('click', () => { appReset.click(); sessionTotal = 0; sessionFull = 0; updateCounters(); });
+          extra.appendChild(reset);
+        }
+        box.append(label, value, help, extra);
+      }
+      row.before(box);
+      updateCounters();
+    }
+    const names = { total: 'totalBlinks', full: 'fullBlinks', part: 'partBlinks' };
+    box.querySelectorAll('span.text').forEach((l) => { const s = t(names[l.dataset.k]) + ':'; if (l.textContent !== s) l.textContent = s; });
+    const reset = box.querySelector('button');
+    if (reset && appReset && reset.textContent !== appReset.textContent) reset.textContent = appReset.textContent;
+  }
+  new MutationObserver(addCounters).observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+
+  // "See statistics" on its own line below the counters.
   function addStatsButton() {
     const old = document.getElementById('fsaux-stats-btn');
     if (old) { if (old.textContent !== t('seeStats')) old.textContent = t('seeStats'); return; }
-    const counter = document.querySelector('.alert__description code');
-    const row = counter && counter.parentElement;
-    if (!row || !row.parentElement) return;
+    const box = document.getElementById('fsaux-counters');
+    if (!box) return;
     const b = document.createElement('button');
     b.id = 'fsaux-stats-btn';
     b.className = 'text textStyle_sm';
     // A compact text link (a full-size button would push the panel's content
     // out of the fixed-size window).
-    b.style.cssText = 'align-self:flex-start;margin-top:-4px;padding:0;height:auto;line-height:1.2;background:none;border:none;cursor:pointer;text-decoration:underline;font-weight:600';
+    b.style.cssText = 'align-self:flex-start;margin-top:2px;padding:0;height:auto;line-height:1.2;background:none;border:none;cursor:pointer;text-decoration:underline;font-weight:600;white-space:nowrap';
     b.textContent = t('seeStats');
     b.addEventListener('click', () => openStats());
-    row.after(b);
+    box.after(b);
   }
   new MutationObserver(addStatsButton).observe(document.documentElement, { childList: true, subtree: true });
 
@@ -848,17 +1003,19 @@
   function addAutostartBox(update) {
     const b = toggleButton();
     const row = b && b.parentElement;
-    if (!row || !row.parentElement || autostart === null || autostart === 'unsupported') return;
+    if (!row || autostart === null || autostart === 'unsupported') return;
     let box = document.getElementById('fsaux-autostart');
     if (box && !update && box.querySelector('span span').textContent === t('autostart')) return;
     if (!box) {
       box = document.createElement('label');
       box.id = 'fsaux-autostart';
       box.className = 'text textStyle_xs';
-      box.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:2px;margin-top:4px;cursor:pointer';
+      // Next to the start/stop button (below it there's no room left).
+      box.style.cssText = 'display:flex;flex-direction:column;align-items:flex-start;gap:2px;margin-left:18px;cursor:pointer;max-width:200px';
       box.innerHTML = '<span style="display:flex;align-items:center;gap:6px"><input type="checkbox" style="width:14px;height:14px;cursor:pointer"><span></span></span><span style="color:#57606a"></span>';
       box.querySelector('input').addEventListener('change', (e) => post({ cmd: 'autostart', on: e.target.checked }));
-      row.parentElement.insertBefore(box, row.nextSibling);
+      row.style.alignItems = 'center';
+      row.appendChild(box);
     }
     box.querySelector('input').checked = autostart === 'on' || autostart === 'approval';
     box.querySelector('span span').textContent = t('autostart');

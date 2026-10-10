@@ -10,12 +10,12 @@ Patches the Mac App Store build of **eyeREST** (`com.vinlemon.eyeREST`, tested w
 4. **The main window's red (close) button quits the app**, after a confirmation ("eyeREST beenden?" / "Quit eyeREST?").
 5. **Automatic camera.** The camera dropdown gets an extra first entry, **"Auto ⟳ <camera in use>"**. While it's selected, eyeREST uses a connected external camera, or the built-in one if there isn't one. Plugging a camera in or out while monitoring (also detaching a display with a camera and opening the lid) restarts monitoring with the new camera. On the first launch of the patched app, the saved camera is switched to Auto once; you can still pick a specific camera.
 6. **The smile stays up while no face is detected** (while monitoring is running), so you notice you've drifted off-camera. It floats above all other apps, but **below eyeREST's own window** while you're using it, so it never covers the settings.
-7. **Glasses icon menu:** clicking the menu-bar icon (left or right click) opens a menu with **Open**, **Start**, **Stop** and **Exit**. Start and Stop are greyed out when they don't apply.
+7. **Glasses icon menu:** clicking the menu-bar icon (left or right click) opens a menu with **Open**, **Start**, **Stop** and **Exit**, in the app's language. Start and Stop are greyed out when they don't apply. At the top, a non-clickable line shows the **hourly rate**: blinks per minute over the last hour, counted like the statistics, or "—" with under 5 minutes of data. The menu follows the system appearance (light or dark) instead of the menu bar's.
 8. **Monitoring starts by itself** every time the app launches, even if you stopped it with STOPP or the menu's Stop before quitting.
 
 9. **The smile is always centered** on the screen you're working on, also after switching between a big and a small display, with no restart needed.
 
-10. **Usage statistics.** **See statistics**, below the app's blink counter, opens two GitHub-style grids covering the past year, one square per day. **Back** (lower right) returns to the main view. Hovering a square shows that day's value:
+10. **Usage statistics.** **See statistics**, below the app's blink counter, opens two GitHub-style grids covering the past year, one square per day. **Back** (lower right) returns to the main view. **Export CSV** saves one row per recorded day (date, screen and monitoring minutes, monitoring share, measured blink minutes, total / complete / incomplete blinks, blinks per minute, incomplete share) to a file you choose. Hovering a square shows that day's value:
     - **Monitoring time:** the share of the day's screen-on time with monitoring running, e.g. "63 % (4 h 12 min of 6 h 40 min)". Screen-on time comes from the macOS power log (`pmset -g log`), so time when eyeREST wasn't running counts too.
     - **Blinks per minute:** your spontaneous blink rate, all blinks, with the share of incomplete ones, e.g. "14.2/min, 38% incomplete". More is better; at a screen it typically drops well below the normal 15 to 20. Only time while your face is found and you look at the screen counts. Time spent **looking down** (writing, reading notes, the keyboard) is left out, and so are blinks right after a smile (the first blink after it, and any within 3 s), because those answer the smile instead of coming by themselves. A day needs 5 minutes of such time to get a value. See *Blink and gaze detection* below.
 
@@ -45,6 +45,8 @@ The app's face model (MediaPipe Face Landmarker, about 13 frames per second) bui
 
 17. **"Any" in the eye selection** (next to L / R / LR): a blink counts when either eye closes. Best when the camera sees you at an angle and one eye looks much smaller. Choosing it reloads the app's page, like the 4s timer.
 18. **Detection quality** below the eye selection: good, fair or poor, with a hint when it isn't good. When it stays poor for a minute, the smile shows "Adjust the camera angle" underneath.
+
+19. **Blink counters** below "Count your blinks here", instead of the app's single counter: **Total blinks**, **Complete blinks** and **Incomplete blinks**, aligned, each with a **?** that explains on hover what it counts, how it's defined and why it matters. Total = complete + incomplete, all from the patch's own detection, since monitoring started. The app's own number also includes blinks its own rule found, so it wouldn't add up. **Reset** (in the Complete blinks row) zeroes these counters and the app's own counter, not the statistics. The start/stop button is lower, with **Run at startup** next to it, so everything fits in the fixed-size window.
 
 ## Quick start
 
@@ -78,7 +80,7 @@ After installing, macOS will probably ask for **camera access** again, because t
 | `fsaux.m` | Source of the injected library (`libfsaux.dylib`): window, Dock and button changes, plus injecting the JS below |
 | `fsaux-inject.js` | JavaScript injected into the app's main WebView: the Auto camera and the no-face smile. Copied to `Contents/Resources/`, so you can edit it and re-run `patch.sh` without touching the C code |
 | `insert_dylib.py` | Adds an `LC_LOAD_DYLIB` load command for the library to every slice of the `eyerest` binary |
-| `ents.plist` | Entitlements for the ad-hoc re-signature: sandbox, camera, network client, plus read-only access to `/private/var/log/powermanagement/` (for screen time) |
+| `ents.plist` | Entitlements for the ad-hoc re-signature: sandbox, camera, network client, read-only access to `/private/var/log/powermanagement/` (for screen time), and read/write access to files the user picks in a save dialog (CSV export) |
 | `patch.sh` | Full pipeline: back up, compile, inject, edit Info.plist, re-sign |
 | `com.vinlemon.eyeREST.fsaux-autostart.plist` | Login item for "Run at startup", copied to `Contents/Library/LaunchAgents/`. It runs the app's binary with `--fsaux-autostart` |
 | `install.sh` | Copies the patched app (or `restore`: the original) into `/Applications` |

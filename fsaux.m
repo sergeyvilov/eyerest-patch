@@ -194,6 +194,7 @@ static void fsaux_quit(NSWindow *w, NSString *why) {
 // Every user-initiated exit asks first (logout/shutdown don't go through here).
 // The alert runs on the next run-loop turn, outside tao's event handler.
 static NSString *uiLang = @"en";  // app language code, reported by the JS
+static NSNumber *hourlyRate;       // blinks per minute over the last hour, from the JS (nil = not enough data)
 
 // Exit dialog texts: title, message, quit, cancel.
 static NSArray<NSString *> *fsaux_quitTexts(void) {
@@ -309,7 +310,7 @@ static void *swizzle(Class c, SEL sel, void *imp) {
 // Contents/Resources/fsaux-inject.js is added as a user script to every
 // WKWebView. JS talks back via window.webkit.messageHandlers.fsaux.postMessage
 // ({cmd: 'log', msg} | {cmd: 'state', running} | {cmd: 'ghost', on} | {cmd: 'menu', item} |
-//  {cmd: 'windows'} | {cmd: 'write', name, data} | {cmd: 'screentime'}).
+//  {cmd: 'windows'} | {cmd: 'write', name, data} | {cmd: 'screentime'} | {cmd: 'export', name, data}).
 
 static NSHashTable<WKWebView *> *webViews;  // weak
 static BOOL monitoringRunning;
@@ -370,9 +371,14 @@ static void fsaux_ghost(NSWindow *w, BOOL on) {
     if ([cmd isEqual:@"log"]) {
         fsaux_log(m.webView.window, [NSString stringWithFormat:@"JS %@", d[@"msg"]]);
     } else if ([cmd isEqual:@"state"]) {
+        // Sent on every change of running state, language or hourly rate.
+        BOOL was = monitoringRunning;
+        static BOOL logged;
         monitoringRunning = [d[@"running"] boolValue];
         if ([d[@"lang"] isKindOfClass:[NSString class]]) uiLang = d[@"lang"];
-        fsaux_log(m.webView.window, monitoringRunning ? @"state running" : @"state stopped");
+        hourlyRate = [d[@"rate"] isKindOfClass:[NSNumber class]] ? d[@"rate"] : nil;
+        if (!logged || was != monitoringRunning) fsaux_log(m.webView.window, monitoringRunning ? @"state running" : @"state stopped");
+        logged = YES;
     } else if ([cmd isEqual:@"ghost"]) {
         fsaux_ghost(m.webView.window, [d[@"on"] boolValue]);
     } else if ([cmd isEqual:@"menu"]) {
@@ -388,6 +394,22 @@ static void fsaux_ghost(NSWindow *w, BOOL on) {
         // {cmd: 'autostart'} reports the state, {cmd: 'autostart', on} changes it.
         if (d[@"on"]) fsaux_setAutostart([d[@"on"] boolValue]);
         fsaux_sendAutostart();
+    } else if ([cmd isEqual:@"export"]) {
+        // {cmd: 'export', name, data}: save the statistics as a file the user picks.
+        NSString *name = [[d[@"name"] description] lastPathComponent], *data = [d[@"data"] description];
+        NSWindow *w = m.webView.window;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSSavePanel *p = [NSSavePanel savePanel];
+            p.nameFieldStringValue = name;
+            p.canCreateDirectories = YES;
+            [NSApp activateIgnoringOtherApps:YES];
+            [p beginSheetModalForWindow:w completionHandler:^(NSModalResponse r) {
+                if (r != NSModalResponseOK || !p.URL) return;
+                NSError *err;
+                BOOL ok = [data writeToURL:p.URL atomically:YES encoding:NSUTF8StringEncoding error:&err];
+                fsaux_log(w, [NSString stringWithFormat:@"export %@: %@", p.URL.path, ok ? @"ok" : err]);
+            }];
+        });
     } else if ([cmd isEqual:@"windows"]) {
         for (NSWindow *w in NSApp.windows) {
             fsaux_log(w, w.isVisible ? @"window (visible)" : @"window (hidden)");
@@ -614,18 +636,60 @@ static id fsaux_menuTarget(void) {
     return target;
 }
 
+// Menu texts in the app's language: Open, Start, Stop, Exit, hourly rate
+// ("%@" = blinks per minute over the last hour, or "—").
+static NSArray<NSString *> *fsaux_menuTexts(void) {
+    static NSDictionary<NSString *, NSArray<NSString *> *> *texts;
+    if (!texts) texts = @{
+        @"en": @[@"Open", @"Start", @"Stop", @"Exit", @"Hourly rate: %@ blinks/min"],
+        @"de": @[@"Öffnen", @"Start", @"Stopp", @"Beenden", @"Stundenrate: %@ Blinzler/min"],
+        @"it": @[@"Apri", @"Avvia", @"Ferma", @"Esci", @"Media oraria: %@ battiti/min"],
+        @"es": @[@"Abrir", @"Iniciar", @"Detener", @"Salir", @"Media por hora: %@ parpadeos/min"],
+        @"ru": @[@"Открыть", @"Старт", @"Стоп", @"Выход", @"За час: %@ морг./мин"],
+        @"ja": @[@"開く", @"開始", @"停止", @"終了", @"直近1時間: %@ 回/分"],
+        @"zh": @[@"打开", @"开始", @"停止", @"退出", @"最近一小时: %@ 次/分钟"],
+    };
+    return texts[uiLang] ?: texts[@"en"];
+}
+
+
+static NSString *fsaux_hourlyRateText(void) {
+    NSString *v = @"—";
+    if (hourlyRate) {
+        NSNumberFormatter *f = [NSNumberFormatter new];
+        f.locale = [NSLocale localeWithLocaleIdentifier:uiLang];
+        f.minimumFractionDigits = f.maximumFractionDigits = 1;
+        v = [f stringFromNumber:hourlyRate];
+    }
+    return [NSString stringWithFormat:fsaux_menuTexts()[4], v];
+}
+
 static void fsaux_showTrayMenu(NSView *view) {
     static NSMenu *menu;
+    static NSMenuItem *rateItem;
+    static NSArray<NSMenuItem *> *items;
     if (!menu) {
         id target = fsaux_menuTarget();
         menu = [[NSMenu alloc] initWithTitle:@"eyeREST"];
-        for (NSArray *e in @[@[@"Open", @"open:"], @[@"Start", @"start:"], @[@"Stop", @"stop:"],
-                             @[@"-", @""], @[@"Exit", @"exit:"]]) {
-            if ([e[0] isEqual:@"-"]) { [menu addItem:[NSMenuItem separatorItem]]; continue; }
-            NSMenuItem *i = [menu addItemWithTitle:e[0] action:NSSelectorFromString(e[1]) keyEquivalent:@""];
+        menu.autoenablesItems = YES;
+        // Non-clickable: no action, so it shows greyed out.
+        rateItem = [menu addItemWithTitle:@"" action:nil keyEquivalent:@""];
+        [menu addItem:[NSMenuItem separatorItem]];
+        NSMutableArray *list = [NSMutableArray array];
+        for (NSString *sel in @[@"open:", @"start:", @"stop:", @"-", @"exit:"]) {
+            if ([sel isEqual:@"-"]) { [menu addItem:[NSMenuItem separatorItem]]; continue; }
+            NSMenuItem *i = [menu addItemWithTitle:@"" action:NSSelectorFromString(sel) keyEquivalent:@""];
             i.target = target;
+            [list addObject:i];
         }
+        items = list;
     }
+    NSArray<NSString *> *tx = fsaux_menuTexts();
+    for (NSUInteger k = 0; k < items.count; k++) items[k].title = tx[k];
+    rateItem.title = fsaux_hourlyRateText();
+    // The status-bar button's appearance follows the menu bar (often dark);
+    // the menu should look like any other menu, following the system.
+    menu.appearance = NSApp.effectiveAppearance;
     NSView *button = view.superview ?: view;
     [menu popUpMenuPositioningItem:nil atLocation:NSMakePoint(0, -4) inView:button];
 }
