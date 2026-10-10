@@ -39,7 +39,7 @@ Patches the Mac App Store build of **eyeREST** (`com.vinlemon.eyeREST`, tested w
 
 ### Blink counters
 
-Below "Count your blinks here", instead of the app's single counter, there are three aligned counters: **Total blinks**, **Complete blinks** and **Incomplete blinks**. Each has a **?** that explains on hover what it counts, how it's defined and why it matters.
+Below "Count your blinks here", instead of the app's single counter, there are three aligned counters: **Total blinks**, **Complete blinks** and **Incomplete blinks**. An **i** in the card's corner, like the app's own info buttons, opens a dialog explaining what each counts, how it's defined and why it matters.
 
 - Total = complete + incomplete. All three come from the patch's own detection and count since monitoring started.
 - **Reset** (in the Complete blinks row) zeroes them and the app's own counter. The statistics aren't affected.

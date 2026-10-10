@@ -657,6 +657,7 @@
     },
     seeStats: { en: 'See statistics', de: 'Statistik ansehen', it: 'Vedi statistiche', es: 'Ver estadísticas', ru: 'Посмотреть статистику', ja: '統計を見る', zh: '查看统计' },
     exportCsv: { en: 'Export CSV', de: 'Als CSV exportieren', it: 'Esporta CSV', es: 'Exportar CSV', ru: 'Экспорт в CSV', ja: 'CSVで書き出す', zh: '导出 CSV' },
+    close: { en: 'Close', de: 'Schließen', it: 'Chiudi', es: 'Cerrar', ru: 'Закрыть', ja: '閉じる', zh: '关闭' },
     back: { en: 'Back', de: 'Zurück', it: 'Indietro', es: 'Atrás', ru: 'Назад', ja: '戻る', zh: '返回' },
     autostart: { en: 'Run at startup', de: 'Beim Systemstart ausführen', it: "Avvia all'accensione", es: 'Abrir al iniciar sesión', ru: 'Запускать при входе в систему', ja: 'ログイン時に起動', zh: '登录时启动' },
     approval: {
@@ -825,15 +826,12 @@
   }
 
   let panel = null, tip = null;
-  function showTip(target, s, wrap) {
+  function showTip(target, s) {
     if (!tip) {
       tip = document.createElement('div');
       tip.style.cssText = 'position:fixed;z-index:1001;pointer-events:none;background:#24292f;color:#fff;font-size:11px;padding:5px 8px;border-radius:6px;white-space:nowrap';
       document.body.appendChild(tip);
     }
-    tip.style.whiteSpace = wrap ? 'normal' : 'nowrap';
-    tip.style.maxWidth = wrap ? '300px' : 'none';
-    tip.style.lineHeight = wrap ? '1.4' : 'normal';
     tip.textContent = s;
     tip.hidden = false;
     const r = target.getBoundingClientRect();
@@ -935,8 +933,8 @@
   // incomplete blinks as detected here, since monitoring started (the app's
   // own count also includes its own rule's detections, so it wouldn't add
   // up). The app's row (counter + Reset) is hidden; this block's Reset clicks
-  // the app's Reset and zeroes these counters. Each has a "?" with an
-  // explanation on hover.
+  // the app's Reset and zeroes these counters. An "i" in the card's corner
+  // opens an explanation, like the app's own "i" buttons.
   function updateCounters() {
     const box = document.getElementById('fsaux-counters');
     if (!box) return;
@@ -959,7 +957,7 @@
     if (!box) {
       box = document.createElement('div');
       box.id = 'fsaux-counters';
-      box.style.cssText = 'display:grid;grid-template-columns:auto auto auto 1fr;align-items:center;column-gap:6px;row-gap:2px';
+      box.style.cssText = 'display:grid;grid-template-columns:auto auto 1fr;align-items:center;column-gap:6px;row-gap:2px';
       // Space is tight in the fixed-size window: less gap above the block.
       if (row.parentElement.style.gap !== '6px') row.parentElement.style.gap = '6px';
       for (const k of ['total', 'full', 'part']) {
@@ -969,16 +967,9 @@
         const value = document.createElement('code');
         value.className = counter.className + ' fsaux-count';
         value.style.cssText = 'justify-self:end;min-width:3.2em;text-align:right;padding-block:0;height:22px;line-height:20px;font-size:14px';
-        const help = document.createElement('span');
-        help.textContent = '?';
-        help.dataset.k = k;
-        help.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;' +
-          'border:1px solid #8c959f;color:#57606a;font-size:10px;font-weight:600;cursor:help;user-select:none';
-        help.addEventListener('mouseenter', () => showTip(help, t(k + 'Info'), true));
-        help.addEventListener('mouseleave', hideTip);
         const extra = document.createElement('span');
         extra.dataset.k = k;
-        extra.style.cssText = 'display:flex';
+        extra.style.cssText = 'display:flex;margin-left:8px';
         if (k === 'full' && appReset) {
           const reset = document.createElement('button');
           reset.className = appReset.className;
@@ -986,10 +977,11 @@
           reset.addEventListener('click', () => { appReset.click(); sessionTotal = 0; sessionFull = 0; updateCounters(); });
           extra.appendChild(reset);
         }
-        box.append(label, value, help, extra);
+        box.append(label, value, extra);
       }
       row.before(box);
       updateCounters();
+      addCountersInfo(box);
     }
     const names = { total: 'totalBlinks', full: 'fullBlinks', part: 'partBlinks' };
     box.querySelectorAll('span.text').forEach((l) => { const s = t(names[l.dataset.k]) + ':'; if (l.textContent !== s) l.textContent = s; });
@@ -997,6 +989,58 @@
     if (reset && appReset && reset.textContent !== appReset.textContent) reset.textContent = appReset.textContent;
   }
   new MutationObserver(addCounters).observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+
+  // The "i" (a copy of the app's info button) at the top right of the
+  // counter card, and the explanation dialog, built from the app's own dialog
+  // classes so it looks and behaves like the app's info dialogs.
+  function addCountersInfo(box) {
+    const content = box.closest('.alert__content');
+    const card = content && content.parentElement;
+    const icon = document.querySelector('button[data-part="trigger"] svg.lucide-badge-info');
+    const appInfo = icon && icon.closest('button');
+    if (!card || !appInfo || document.getElementById('fsaux-counters-info')) return;
+    const btn = document.createElement('button');
+    btn.id = 'fsaux-counters-info';
+    btn.type = 'button';
+    btn.className = appInfo.className;
+    btn.innerHTML = appInfo.innerHTML;
+    btn.style.cssText = 'position:absolute;top:8px;right:8px';
+    if (getComputedStyle(card).position === 'static') card.style.position = 'relative';
+    btn.addEventListener('click', openCountersInfo);
+    card.appendChild(btn);
+  }
+  let infoDialog = null;
+  function openCountersInfo() {
+    if (!infoDialog) {
+      const x = document.querySelector('button[data-part="close-trigger"][aria-label] svg');
+      infoDialog = document.createElement('div');
+      infoDialog.innerHTML =
+        '<div data-scope="dialog" data-part="backdrop" data-state="open" class="bdr_8 dialog__backdrop"></div>' +
+        '<div data-scope="dialog" data-part="positioner" data-state="open" class="dialog__positioner">' +
+        '<div data-scope="dialog" data-part="content" role="dialog" aria-modal="true" data-state="open" class="dialog__content" style="pointer-events:auto;position:relative">' +
+        // Only the text scrolls (it's longer than the app's), Close stays visible.
+        '<div class="d_flex flex-d_column gap_8 max-w_500 p_6"><div class="d_flex flex-d_column gap_10px fsaux-info-text" style="max-height:440px;overflow:auto;padding-right:6px"></div>' +
+        '<div class="d_flex flex-d_row gap_3 w_full"><button type="button" class="button button--variant_solid button--size_md w_full fsaux-info-close"></button></div></div>' +
+        '<button type="button" aria-label="Close" class="button button--variant_ghost button--size_sm px_0 pos_absolute top_2 right_2 fsaux-info-close">' + (x ? x.outerHTML : '✕') + '</button>' +
+        '</div></div>';
+      for (const el of infoDialog.querySelectorAll('.fsaux-info-close, [data-part="backdrop"]')) el.addEventListener('click', closeCountersInfo);
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && infoDialog && infoDialog.isConnected) closeCountersInfo(); });
+    }
+    const text = infoDialog.querySelector('.fsaux-info-text');
+    text.textContent = '';
+    for (const [icon, k, info] of [['🔢', 'totalBlinks', 'totalInfo'], ['👁️', 'fullBlinks', 'fullInfo'], ['😑', 'partBlinks', 'partInfo']]) {
+      const h = document.createElement('h4');
+      h.className = 'text text--variant_heading textStyle_xl';
+      h.textContent = icon + ' ' + t(k);
+      const p = document.createElement('p');
+      p.textContent = t(info);
+      text.append(h, p);
+    }
+    infoDialog.querySelector('button.w_full').textContent = t('close');
+    document.body.appendChild(infoDialog);
+    text.scrollTop = 0;
+  }
+  function closeCountersInfo() { if (infoDialog) infoDialog.remove(); }
 
   // "See statistics" on its own line below the counters.
   function addStatsButton() {
