@@ -623,6 +623,12 @@ static void fsaux_runJS(NSString *js) {
 - (void)start:(id)sender { fsaux_runJS(@"window.__fsaux && window.__fsaux.start()"); }
 - (void)stop:(id)sender { fsaux_runJS(@"window.__fsaux && window.__fsaux.stop()"); }
 - (void)exit:(id)sender { fsaux_confirmQuit(fsaux_mainWindow(), @"menu exit->quit"); }
+// The app's info page, which its footer's robot icon opens (its
+// "show_about" command is unused and does nothing).
+- (void)about:(id)sender {
+    [self open:sender];
+    fsaux_runJS(@"window.__fsaux && window.__fsaux.about()");
+}
 - (BOOL)validateMenuItem:(NSMenuItem *)item {
     if (item.action == @selector(start:)) return !monitoringRunning;
     if (item.action == @selector(stop:)) return monitoringRunning;
@@ -637,17 +643,17 @@ static id fsaux_menuTarget(void) {
 }
 
 // Menu texts in the app's language: Open, Start, Stop, Exit, hourly rate
-// ("%@" = blinks per minute over the last hour, or "—").
+// ("%@" = blinks per minute over the last hour, or "—"), About.
 static NSArray<NSString *> *fsaux_menuTexts(void) {
     static NSDictionary<NSString *, NSArray<NSString *> *> *texts;
     if (!texts) texts = @{
-        @"en": @[@"Open", @"Start", @"Stop", @"Exit", @"Hourly rate: %@ blinks/min"],
-        @"de": @[@"Öffnen", @"Start", @"Stopp", @"Beenden", @"Stundenrate: %@ Blinzler/min"],
-        @"it": @[@"Apri", @"Avvia", @"Ferma", @"Esci", @"Media oraria: %@ battiti/min"],
-        @"es": @[@"Abrir", @"Iniciar", @"Detener", @"Salir", @"Media por hora: %@ parpadeos/min"],
-        @"ru": @[@"Открыть", @"Старт", @"Стоп", @"Выход", @"За час: %@ морг./мин"],
-        @"ja": @[@"開く", @"開始", @"停止", @"終了", @"直近1時間: %@ 回/分"],
-        @"zh": @[@"打开", @"开始", @"停止", @"退出", @"最近一小时: %@ 次/分钟"],
+        @"en": @[@"Open", @"Start", @"Stop", @"Exit", @"Hourly rate: %@ blinks/min", @"About eyeREST"],
+        @"de": @[@"Öffnen", @"Start", @"Stopp", @"Beenden", @"Stundenrate: %@ Blinzler/min", @"Über eyeREST"],
+        @"it": @[@"Apri", @"Avvia", @"Ferma", @"Esci", @"Media oraria: %@ battiti/min", @"Informazioni su eyeREST"],
+        @"es": @[@"Abrir", @"Iniciar", @"Detener", @"Salir", @"Media por hora: %@ parpadeos/min", @"Acerca de eyeREST"],
+        @"ru": @[@"Открыть", @"Старт", @"Стоп", @"Выход", @"За час: %@ морг./мин", @"Об eyeREST"],
+        @"ja": @[@"開く", @"開始", @"停止", @"終了", @"直近1時間: %@ 回/分", @"eyeRESTについて"],
+        @"zh": @[@"打开", @"开始", @"停止", @"退出", @"最近一小时: %@ 次/分钟", @"关于 eyeREST"],
     };
     return texts[uiLang] ?: texts[@"en"];
 }
@@ -676,7 +682,7 @@ static void fsaux_showTrayMenu(NSView *view) {
         rateItem = [menu addItemWithTitle:@"" action:nil keyEquivalent:@""];
         [menu addItem:[NSMenuItem separatorItem]];
         NSMutableArray *list = [NSMutableArray array];
-        for (NSString *sel in @[@"open:", @"start:", @"stop:", @"-", @"exit:"]) {
+        for (NSString *sel in @[@"open:", @"start:", @"stop:", @"-", @"about:", @"exit:"]) {
             if ([sel isEqual:@"-"]) { [menu addItem:[NSMenuItem separatorItem]]; continue; }
             NSMenuItem *i = [menu addItemWithTitle:@"" action:NSSelectorFromString(sel) keyEquivalent:@""];
             i.target = target;
@@ -685,7 +691,9 @@ static void fsaux_showTrayMenu(NSView *view) {
         items = list;
     }
     NSArray<NSString *> *tx = fsaux_menuTexts();
-    for (NSUInteger k = 0; k < items.count; k++) items[k].title = tx[k];
+    // items: Open, Start, Stop, About, Exit
+    NSArray<NSString *> *titles = @[tx[0], tx[1], tx[2], tx[5], tx[3]];
+    for (NSUInteger k = 0; k < items.count; k++) items[k].title = titles[k];
     rateItem.title = fsaux_hourlyRateText();
     // The status-bar button's appearance follows the menu bar (often dark);
     // the menu should look like any other menu, following the system.

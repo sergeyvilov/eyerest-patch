@@ -2,51 +2,75 @@
 
 > Unofficial. Not affiliated with or endorsed by the makers of eyeREST. This repository contains only the patch; you need your own copy of eyeREST from the Mac App Store. Patching re-signs the app ad hoc, and macOS will treat it as a different app (camera permission is asked again).
 
-Patches the Mac App Store build of **eyeREST** (`com.vinlemon.eyeREST`, tested with 0.2.0 / build 20241021.195631) so that:
+Patches the Mac App Store build of **eyeREST** (`com.vinlemon.eyeREST`, tested with 0.2.0 / build 20241021.195631). Everything the patch adds follows the app's language (English, German, Italian, Spanish, Russian, Japanese, Chinese).
 
-1. **The blink smile shows over full-screen apps** (VSCode, browsers, …).
-2. **No Dock icon.** The app lives only in the menu bar (the glasses icon).
-3. **The main window's yellow (minimize) button hides the window.** Bring it back with **Open** in the glasses icon's menu.
-4. **The main window's red (close) button quits the app**, after a confirmation ("eyeREST beenden?" / "Quit eyeREST?").
-5. **Automatic camera.** The camera dropdown gets an extra first entry, **"Auto ⟳ <camera in use>"**. While it's selected, eyeREST uses a connected external camera, or the built-in one if there isn't one. Plugging a camera in or out while monitoring (also detaching a display with a camera and opening the lid) restarts monitoring with the new camera. On the first launch of the patched app, the saved camera is switched to Auto once; you can still pick a specific camera.
-6. **The smile stays up while no face is detected** (while monitoring is running), so you notice you've drifted off-camera. It floats above all other apps, but **below eyeREST's own window** while you're using it, so it never covers the settings.
-7. **Glasses icon menu:** clicking the menu-bar icon (left or right click) opens a menu with **Open**, **Start**, **Stop** and **Exit**, in the app's language. Start and Stop are greyed out when they don't apply. At the top, a non-clickable line shows the **hourly rate**: blinks per minute over the last hour, counted like the statistics, or "—" with under 5 minutes of data. The menu follows the system appearance (light or dark) instead of the menu bar's.
-8. **Monitoring starts by itself** every time the app launches, even if you stopped it with STOPP or the menu's Stop before quitting.
+## Features
 
-9. **The smile is always centered** on the screen you're working on, also after switching between a big and a small display, with no restart needed.
+### App, window and menu
 
-10. **Usage statistics.** **See statistics**, below the app's blink counter, opens two GitHub-style grids covering the past year, one square per day. **Back** (lower right) returns to the main view. **Export CSV** saves one row per recorded day (date, screen and monitoring minutes, monitoring share, measured blink minutes, total / complete / incomplete blinks, blinks per minute, incomplete share) to a file you choose. Hovering a square shows that day's value:
-    - **Monitoring time:** the share of the day's screen-on time with monitoring running, e.g. "63 % (4 h 12 min of 6 h 40 min)". Screen-on time comes from the macOS power log (`pmset -g log`), so time when eyeREST wasn't running counts too.
-    - **Blinks per minute:** your spontaneous blink rate, all blinks, with the share of incomplete ones, e.g. "14.2/min, 38% incomplete". More is better; at a screen it typically drops well below the normal 15 to 20. Only time while your face is found and you look at the screen counts. Time spent **looking down** (writing, reading notes, the keyboard) is left out, and so are blinks right after a smile (the first blink after it, and any within 3 s), because those answer the smile instead of coming by themselves. A day needs 5 minutes of such time to get a value. See *Blink and gaze detection* below.
+- **Menu-bar only.** No Dock icon; the app lives in the menu bar (the glasses icon).
+- **Starts hidden, monitoring on.** At launch the main window stays hidden and monitoring starts by itself, even if it was stopped before quitting. The window does show at launch while the camera permission or the app's first-run intro is still pending.
+- **Run at startup** checkbox at the bottom of the Popup section. eyeREST then starts at login, and it appears in System Settings → General → Login Items. If macOS asks you to allow it there, the checkbox says so. The app's own autostart can't work inside the macOS sandbox.
+- **Glasses icon menu** (left or right click):
+  - a non-clickable line with the **hourly rate**: blinks per minute over the last hour, or "—" with under 5 minutes of data;
+  - **Open**, **Start** and **Stop** (greyed out when they don't apply);
+  - **About eyeREST** (the app's info page; monitoring resumes after Close);
+  - **Exit**.
 
-    Below each grid are the averages for the last 7 days and the 7 days before, weighted by time and using only days that show a value themselves. Recording starts when the patched app first runs, and earlier days show as "no data".
+  The menu follows the system appearance, not the menu bar's.
+- **Window buttons.** The yellow button hides the window (bring it back with **Open**, or by opening eyeREST again while it runs). The red button quits.
+- **Exit asks for confirmation**, from the menu and from the red button. Return quits and Esc cancels. Logging out or shutting down isn't held up.
+- Reopening the window always shows the main view, even if the statistics were open before.
 
-11. **"Run at startup" checkbox** (Beim Systemstart ausführen) at the bottom of the Popup section. When it's ticked, eyeREST starts at login with monitoring running. Open the window with the glasses icon's **Open**. It shows up in System Settings → General → Login Items as eyeREST. If macOS asks you to allow it there, the checkbox says so. The app's own built-in autostart can't work inside the macOS sandbox, which is why this replaces it.
+### Camera and monitoring
 
-12. **The main window stays hidden at launch.** eyeREST starts straight into the menu bar with monitoring running. Open the window with the glasses icon's **Open**, or by opening eyeREST again (Finder, Spotlight, Launchpad) while it's running. It does show at launch while the camera permission or the app's first-run intro is still pending.
+- **Automatic camera.** The camera dropdown gets a first entry, **"Auto ⟳ <camera in use>"**. While it's selected, eyeREST uses a connected external camera, or the built-in one if there isn't one. Plugging a camera in or out (also detaching a display with a camera and opening the lid) restarts monitoring with the new camera. On the first launch of the patched app, the saved camera is switched to Auto once.
+- **Eye selection "Any"** next to L / R / LR: a blink counts when either eye closes. Best when the camera sees you at an angle and one eye looks much smaller.
+- **Detection quality** below the eye selection: good, fair or poor, with a hint when it isn't good.
 
-13. **Exit asks for confirmation**, both from the menu's **Exit** and from the red close button. Return quits and Esc cancels. Logging out or shutting down isn't held up.
+### The smile
+
+- **Shows over full-screen apps** (VSCode, browsers, …).
+- **Always centered** on the screen you're working on, also after switching displays.
+- **Stays up while no face is detected** (while monitoring), so you notice you've drifted off-camera. It floats above other apps but below eyeREST's own window while you use it.
+- **"Adjust the camera angle"** appears under it (small grey text) after a full minute of poor detection quality with your face in view.
+- **4-second timer** between 3s and 5s. Choosing it reloads the app's page (about 2 s), since the app reads its settings only at start; monitoring restarts by itself.
+- **"Count incomplete blinks"** checkbox below the eye selection, checked by default. Checked: every blink dismisses or postpones the smile, and blinks the patch sees but the app's own detector misses are passed on to the app. Unchecked: only complete blinks count, which trains complete blinking.
+
+### Blink counters
+
+Below "Count your blinks here", instead of the app's single counter, there are three aligned counters: **Total blinks**, **Complete blinks** and **Incomplete blinks**. Each has a **?** that explains on hover what it counts, how it's defined and why it matters.
+
+- Total = complete + incomplete. All three come from the patch's own detection and count since monitoring started.
+- **Reset** (in the Complete blinks row) zeroes them and the app's own counter. The statistics aren't affected.
+- The start/stop button is lower, so everything fits in the fixed-size window.
+
+### Statistics
+
+**See statistics** (below the counters) opens two GitHub-style grids covering the past year, one square per day. Hovering a square shows that day's value:
+
+- **Monitoring time:** the share of the day's screen-on time with monitoring running, e.g. "63 % (4 h 12 min of 6 h 40 min)". Screen-on time comes from the macOS power log (`pmset -g log`), so time when eyeREST wasn't running counts too. Time with the screen asleep or locked isn't counted as monitoring.
+- **Blinks per minute:** all spontaneous blinks, with the share of incomplete ones, e.g. "14.2/min, 38% incomplete". More is better; at a screen the rate typically drops well below the normal 15 to 20. Only time while your face is found and you look at the screen counts. Blinks right after a smile are left out (the first one after it, and any within 3 s), because they answer the smile. A day needs 5 minutes of such time to get a value.
+
+Below each grid are the averages for the last 7 days and the 7 days before. They're weighted by time and use only days that show a value themselves. **Export CSV** saves one row per recorded day to a file you choose: date, screen and monitoring minutes, monitoring share, measured blink minutes, total / complete / incomplete blinks, blinks per minute and incomplete share. **Back** returns to the main view. Recording starts when the patched app first runs; earlier days show as "no data".
 
 ### Blink and gaze detection
 
-The app's face model (MediaPipe Face Landmarker, about 13 frames per second) builds 478 face points (468 face + 10 iris) per frame by pushing them one by one into an array. A wrapper around `Array.prototype.push` picks up the array when its 478th point arrives. The app's own blink rule (a score 0.2 above the average since the last blink) is not used for the statistics:
+The app's face model (MediaPipe Face Landmarker, about 13 frames per second) builds 478 face points (468 face + 10 iris) per frame by pushing them one by one into an array. A wrapper around `Array.prototype.push` picks up the array when its 478th point arrives.
 
-- **Blink:** the eye aspect ratio (EAR = eyelid gap / eye width, measured in 3D with MediaPipe's z; points 33/160/158/133/153/144 and 362/385/387/263/373/380), relative to its usual value (which follows open-eye frames over about 2 s). Which eye counts follows the eye selection: **L** or **R** only that eye (MediaPipe's left eye, points 362…, or its right eye, points 33…, the same mapping the app uses); **LR** both together (average, as in the app); **Any** whichever eye closes further. A blink means the eye drops below 55 % and opens again (above 80 %) within 800 ms. Below 47 % it's **full**, otherwise **incomplete**. Shallower eyelid movements aren't counted, because they blend into slow eyelid movements while reading and looking around. The thresholds come from 2 × 20 counted blinks (found 20 and 21, with 2 false detections in 70 s of reading or holding the eyes open). A threshold derived automatically from the data (Otsu) was tried and dropped: depending on the recording it landed at 54 % or 61 %, which changed the rate by about a third.
-- **Passing blinks to the app:** the app shows the smile when its own rule (an eyeBlink blendshape score 0.2 above the average since its last blink) sees no blink for the timer duration. It reads those scores through `Array#filter` (LR) / `#find` (L, R) once per frame, and the patch wraps both. With **Count incomplete blinks** checked (the default), the app's rule is replayed. A blink detected here that the app didn't count within 700 ms is handed to it as scores of 1 on the next frame, so its smile timer starts over. Unchecked, or with the eye selection **Any** (for which the app's own lookup finds no eye), the app gets a neutral low score of 0.01 between blinks, and only blinks detected here are handed to it: only full ones when unchecked. A score of 0 would be skipped by the app, and with only 1s its average would be 1, so no blink would stand out.
-- **Detection quality,** from geometry only, with no per-person calibration: the open eyelid gap in camera pixels (which covers distance, camera angle and resolution) and the head angle to the camera (sideways from face edges 234/454, up/down from forehead/chin), both as medians over the last minute. **Good** means at least 9 px and under 15°. **Fair** means 6 to 9 px or 15 to 25°. **Poor** means under 6 px or over 25°. The face model places points to within about 1 to 2 px, so in a small gap an incomplete blink barely shows. The quality line appears below the checkbox in the main window. After a full minute of poor quality with the face in view, the smile window shows "Adjust the camera angle" (small grey text with a thin outline on a transparent background). It reads `localStorage['fsaux-quality']`, which the main window writes, through the `storage` event; a second script in `fsaux-inject.js` handles the smile window. When the face is lost, the measurement starts over and the note disappears, so being away, sitting down or getting up never triggers it.
-- **Looking down:** head pitch in degrees from the forehead (10) and chin (152) points in 3D, compared with the usual pitch for the camera in use: the 30th percentile of the last 5 minutes. A camera above the screen sees you looking down all the time, so a fixed threshold doesn't work. 12° or more above the usual pitch counts as looking down. In a test, writing on paper was about +25° and the keyboard about +15°. Irises clearly lower in the eyes (0.12 eye widths) count too. Frames up to 1.5 s after looking down don't count either.
+- **Blink:** the eye aspect ratio (EAR = eyelid gap / eye width, in 3D with MediaPipe's z; points 33/160/158/133/153/144 and 362/385/387/263/373/380), relative to its usual value, which follows open-eye frames over about 2 s.
+  - Which eye counts follows the eye selection: **L** or **R** only that eye (MediaPipe's left eye, points 362…, or its right eye, points 33…, the same mapping the app uses); **LR** both together (average, as in the app); **Any** whichever eye closes further.
+  - A blink means the eye drops below 55 % and opens again (above 80 %) within 800 ms. Below 47 % it's **complete**, otherwise **incomplete**. Shallower eyelid movements aren't counted: they blend into slow eyelid movements while reading and looking around.
+  - The thresholds come from 2 × 20 counted blinks: found 20 and 21, with 2 false detections in 70 s of reading or holding the eyes open. A threshold derived automatically (Otsu) was tried and dropped. Depending on the recording it landed at 54 % or 61 %, which changed the rate by about a third.
+- **Looking down:** head pitch in degrees from the forehead (10) and chin (152) points in 3D, compared with the usual pitch for the camera in use (the 30th percentile of the last 5 minutes). A camera above the screen sees you looking down all the time, so a fixed threshold doesn't work. 12° above the usual pitch counts as looking down; in a test, writing on paper was about +25° and the keyboard about +15°. Irises clearly lower in the eyes (0.12 eye widths) count too. Frames up to 1.5 s after looking down don't count either.
+- **Passing blinks to the app:** the app shows the smile when its own rule (an eyeBlink blendshape score 0.2 above the average since its last blink) sees no blink for the timer duration. It reads those scores through `Array#filter` (LR) / `#find` (L, R) once per frame, and the patch wraps both.
+  - **Count incomplete blinks** checked: the app's rule is replayed, and a blink detected here that the app didn't count within 700 ms is handed to it as scores of 1 on the next frame.
+  - Unchecked, or with **Any** (for which the app's own lookup finds no eye): the app gets a neutral score of 0.01 between blinks, and only blinks detected here are handed to it (only complete ones when unchecked). A 0 would be skipped by the app, and with only 1s its average would be 1, so no blink would stand out.
+- **Detection quality,** from geometry only, with no per-person calibration. It uses the open eyelid gap in camera pixels (which covers distance, camera angle and resolution) and the head angle to the camera (sideways from face edges 234/454, up/down from forehead/chin), both as medians over the last minute.
+  - **Good:** at least 9 px and under 15°. **Fair:** 6 to 9 px or 15 to 25°. **Poor:** under 6 px or over 25°.
+  - The face model places points to within about 1 to 2 px, so in a small gap an incomplete blink barely shows.
+  - The smile window's note reads `localStorage['fsaux-quality']`, written by the main window, through the `storage` event. When the face is lost, the measurement starts over and the note disappears, so being away, sitting down or getting up never triggers it.
 - The log shows a `face:` line every 10 s while monitoring, with frames, pitch, iris, EAR, and detected/counted blinks.
-
-14. **All of the patch's texts follow the app's language** (English, German, Italian, Spanish, Russian, Japanese, Chinese): the statistics, the "Run at startup" checkbox, the statistics link and the exit dialog. Reopening the window always shows the main view, even if the statistics were open before.
-
-15. **4-second pop-up timer.** The timer choice gets a **4s** button between 3s and 5s, labeled in the app's language (4s, 4с, 4秒, …). The app's list of timer buttons can't be extended, but the setting accepts any number of seconds. Choosing 4s saves it and reloads the app's page (about 2 s), since the app reads its settings only at start. Monitoring restarts by itself.
-
-16. **"Count incomplete blinks" checkbox** below the eye selection, checked by default. Checked: every blink, full or incomplete, dismisses or postpones the smile. Blinks the patch sees but the app's own detector misses (common when the camera looks at you at an angle) are passed on to the app. Unchecked: only full blinks count, which trains complete blinking. The statistics always count all blinks and show the incomplete share separately.
-
-17. **"Any" in the eye selection** (next to L / R / LR): a blink counts when either eye closes. Best when the camera sees you at an angle and one eye looks much smaller. Choosing it reloads the app's page, like the 4s timer.
-18. **Detection quality** below the eye selection: good, fair or poor, with a hint when it isn't good. When it stays poor for a minute, the smile shows "Adjust the camera angle" underneath.
-
-19. **Blink counters** below "Count your blinks here", instead of the app's single counter: **Total blinks**, **Complete blinks** and **Incomplete blinks**, aligned, each with a **?** that explains on hover what it counts, how it's defined and why it matters. Total = complete + incomplete, all from the patch's own detection, since monitoring started. The app's own number also includes blinks its own rule found, so it wouldn't add up. **Reset** (in the Complete blinks row) zeroes these counters and the app's own counter, not the statistics. The start/stop button is lower, so everything fits in the fixed-size window.
 
 ## Quick start
 
@@ -78,7 +102,7 @@ After installing, macOS will probably ask for **camera access** again, because t
 | File | Purpose |
 |---|---|
 | `fsaux.m` | Source of the injected library (`libfsaux.dylib`): window, Dock and button changes, plus injecting the JS below |
-| `fsaux-inject.js` | JavaScript injected into the app's main WebView: the Auto camera and the no-face smile. Copied to `Contents/Resources/`, so you can edit it and re-run `patch.sh` without touching the C code |
+| `fsaux-inject.js` | JavaScript injected into the app's WebViews: Auto camera, no-face smile, start/stop, blink detection, counters, statistics and the added controls (main window), and the camera-angle note (smile window). Copied to `Contents/Resources/`, so you can edit it and re-run `patch.sh` without touching the C code |
 | `insert_dylib.py` | Adds an `LC_LOAD_DYLIB` load command for the library to every slice of the `eyerest` binary |
 | `ents.plist` | Entitlements for the ad-hoc re-signature: sandbox, camera, network client, read-only access to `/private/var/log/powermanagement/` (for screen time), and read/write access to files the user picks in a save dialog (CSV export) |
 | `patch.sh` | Full pipeline: back up, compile, inject, edit Info.plist, re-sign |
@@ -113,11 +137,12 @@ The smile is a borderless 250×200 `TaoWindow` that the app marks as always-on-t
 | `-[NSWindow isMiniaturized]` | Returns YES for the window hidden by minimize |
 | `-[NSWindow deminiaturize:]` | For that hidden window: activate the app and `makeKeyAndOrderFront:` it |
 | `-[WKWebView initWithFrame:configuration:]` | Adds `fsaux-inject.js` as a user script plus a `fsaux` script-message handler (see below) |
-| `TaoTrayTarget` `mouseDown:` / `rightMouseDown:` (`mouseUp:` variants ignored) | Shows the Open/Start/Stop/Exit menu instead of the app's own click handling. Installed with `class_replaceMethod` once the class exists, because the app creates it at runtime |
+| `TaoTrayTarget` `mouseDown:` / `rightMouseDown:` (`mouseUp:` variants ignored) | Shows the patch's menu instead of the app's own click handling. Installed with `class_replaceMethod` once the class exists, because the app creates it at runtime |
 | `-[NSWindow orderWindow:relativeTo:]`, `-[NSWindow orderFrontRegardless]` + `NSApplicationDidChangeScreenParametersNotification` | Every time the overlay is shown, and whenever the display setup changes, it is re-centered on `NSScreen.mainScreen` (the screen with the active app's focused window). The app itself centers it only once, at launch |
 | `NSWorkspaceScreensDidSleep/Wake`, `com.apple.screenIsLocked/Unlocked` | Tell the JS when the screen is off or locked; monitoring time isn't counted then |
-| `{cmd: 'screentime'}` message | Runs `/usr/bin/pmset -g log` and adds up "Display is turned on" → "off"/sleep intervals per local day. Then it calls `window.__fsaux.screenTime({first, days})`. macOS keeps only about a week of this log, so the JS stores each day it receives in `localStorage['fsaux-stats']`, together with monitoring time and smile counts |
+| `{cmd: 'screentime'}` message | Runs `/usr/bin/pmset -g log` and adds up "Display is turned on" → "off"/sleep intervals per local day. Then it calls `window.__fsaux.screenTime({first, days})`. macOS keeps only about a week of this log, so the JS stores each day it receives in `localStorage['fsaux-stats']`, together with monitoring time and blink counts |
 | Overlay hidden → visible (in the `orderWindow:` hooks above) | Calls `window.__fsaux.smileShown()`. Blinks right after it aren't counted as spontaneous |
+| `{cmd: 'export', name, data}` message | Shows a save panel and writes the CSV to the chosen file |
 | `{cmd: 'autostart', on}` message | Registers/unregisters the login item with `SMAppService agentServiceWithPlistName:` and reports the state back via `window.__fsaux.autostartState()` |
 | Every launch | `-orderWindow:relativeTo:` / `-orderFrontRegardless` don't show the main window until **Open**. It counts as minimized, and ghosting it for the camera still works. The JS sends `{cmd: 'menu', item: 'open'}` if `settings.global.permission` isn't `granted` or the intro (`presentation`) is pending |
 | App delegate `applicationShouldHandleReopen:hasVisibleWindows:` (added or replaced once the delegate exists) | Opening the running app again runs **Open** |
@@ -146,16 +171,16 @@ The frontend is a SolidJS app. These details come from the dump in `frontend/mai
 - While no face is found, the app hides the container of `<canvas id="canvas-face-detector">` (with a 2 s debounce), shows a "face not found" card, and hides the popup.
 - The smile window is shown or hidden with the Rust commands `show_blink_popup` / `hide_blink_popup` (no arguments), via `window.__TAURI_INTERNALS__.invoke`.
 
-What the script does (main page only, never in the smile window):
+What the script does in the main page (in the smile window it only shows the camera-angle note):
 
 - **Auto camera:** `enumerateDevices` is wrapped to add a virtual first device `fsaux-auto`, and `getUserMedia` maps that ID to the best real camera. "Best" means the first camera whose label isn't built-in (`BUILTIN` regex: FaceTime/MacBook/iMac/…) and isn't in `IGNORE` (Desk View, virtual cameras, …), otherwise the built-in camera. On `devicechange` (debounced, since several arrive at once on wake), or when the camera's track ends, monitoring is stopped and started again if the best camera changed, which makes the app open the new camera. Swapping the track under the running detector left it without frames. A `MutationObserver` keeps the "Auto ⟳ …" label current. If no labels are available yet (WebKit hides them until the camera has been used once), the script opens and immediately stops the camera once to unlock them.
 - **One-time migration:** sets `settings.global.deviceId = "fsaux-auto"` once and records `localStorage["fsaux-auto-migrated"]`. Delete that key to run the migration again.
 - **No-face smile:** every 1.5 s, if the detector canvas exists inside a `[hidden]` element (monitoring on, no face) and the pop-up setting isn't Disabled, it calls `show_blink_popup`. When the face comes back, it calls `hide_blink_popup` once; after that the app's normal blink timer is in charge again. Showing the popup doesn't take focus from the app you're working in.
-- **Start/stop:** the start/stop control is the page's only `button.button--size_2xl`, and monitoring is running while `#canvas-face-detector` exists. After every launch the script clicks Start once the button is enabled, even after a manual Stop. It exposes `window.__fsaux.start()/stop()/running()` for the menu, and reports `{cmd: 'state', running}` to native code so the menu can grey out Start or Stop.
+- **Start/stop:** the start/stop control is the page's only `button.button--size_2xl`, and monitoring is running while `#canvas-face-detector` exists. After every launch the script clicks Start once the button is enabled, even after a manual Stop. It exposes `window.__fsaux.start()/stop()/running()/about()` for the menu, and reports `{cmd: 'state', running, lang, rate}` to native code: running state (greys out Start or Stop), the app's language and the hourly blink rate for the menu.
 - **Camera requests while the window is hidden:** WebKit only grants `getUserMedia` while the page's window is on screen; otherwise the request just waits, with no error. So Start from the menu with the window minimized used to leave the camera off. Turning off WebKit's private `getUserMediaRequiresFocus` preference didn't help. Instead, the JS sends `{cmd: 'ghost', on: true/false}` around every camera request made while `document.hidden`. Meanwhile `fsaux.m` puts the main window on screen with alpha 0, click-through, using `orderFrontRegardless` (no app activation), then hides it again. It clears the "hidden by minimize" marker during that time; otherwise AppKit would treat ordering it front as un-minimizing, and the `deminiaturize:` hook would activate the app. A 10 s safety net hides the window again if a request never finishes. Camera switching on plug/unplug uses the same mechanism.
 - **Timers run in a Web Worker.** WebKit pauses page timers while the window is hidden, but Worker timers keep running. The app's own face detector uses the same trick.
 
-The `fsaux` message handler accepts `{cmd: 'log', msg}` (written to the log as `JS …`), `{cmd: 'state', running}`, `{cmd: 'ghost', on}`, `{cmd: 'menu', item: 'open'|'start'|'stop'|'exit'}` (runs a menu action without clicking, handy for scripted tests), `{cmd: 'windows'}` (logs every window and its view tree with frames), and `{cmd: 'write', name, data}` (writes a file to `…/Data/tmp/fsaux-dump/`). To re-dump the frontend after an update, temporarily put this in `fsaux-inject.js`:
+The `fsaux` message handler accepts `{cmd: 'log', msg}` (written to the log as `JS …`), `{cmd: 'state', running, lang, rate}`, `{cmd: 'ghost', on}`, `{cmd: 'screentime'}`, `{cmd: 'autostart', on}`, `{cmd: 'export', name, data}`, `{cmd: 'menu', item: 'open'|'start'|'stop'|'about'|'exit'}` (runs a menu action without clicking, handy for scripted tests), `{cmd: 'windows'}` (logs every window and its view tree with frames), and `{cmd: 'write', name, data}` (writes a file to `…/Data/tmp/fsaux-dump/`). To re-dump the frontend after an update, temporarily put this in `fsaux-inject.js`:
 
 ```js
 window.addEventListener('load', async () => {
@@ -179,7 +204,7 @@ window.addEventListener('load', async () => {
 ### Why this re-signing works
 
 - The original binary has **no hardened runtime** (`flags=0x0`), so library validation doesn't apply and an ad-hoc-signed injected library loads fine.
-- The original entitlements include `com.apple.application-identifier`, `com.apple.developer.team-identifier` and `keychain-access-groups`. These are restricted: an ad-hoc-signed app that claims them is killed at launch. `ents.plist` keeps only `app-sandbox`, `device.camera` and `network.client`.
+- The original entitlements include `com.apple.application-identifier`, `com.apple.developer.team-identifier` and `keychain-access-groups`. These are restricted: an ad-hoc-signed app that claims them is killed at launch. `ents.plist` keeps only `app-sandbox`, `device.camera` and `network.client`, and adds two that ad-hoc apps may use: read-only access to the power log (temporary exception) and access to files picked in a save panel.
 - The app stays **sandboxed** with the same bundle ID, so it keeps using its existing container at `~/Library/Containers/com.vinlemon.eyeREST/` and your settings carry over.
 - `/Applications/eyeREST.app` is owned by root (installed by the App Store), so the patched app is built in this folder and copied over with `sudo`.
 
@@ -191,7 +216,7 @@ The library writes a line every time it acts to
 ~/Library/Containers/com.vinlemon.eyeREST/Data/tmp/fsaux.log
 ```
 
-for example `setLevel(top) TaoWindow … level=25 cb=0x151`, `miniaturize->hide`, `deminiaturize->show`, `orderOut->quit`, `JS auto camera -> FaceTime HD-Kamera`, `JS no face -> showing smile`, `tray menu installed`, `JS auto start`, `JS user stop`, `state running`, `menu exit->quit`, `ghost show (camera request while hidden)` / `ghost hide`, `overlay centered`, `started by login item`, `launch: main window kept hidden`, `reopen -> open main window`, `autostart on/off: ok`, `already running (pid N), quitting`, `screen time: N bytes of log, N days from <date>`. Each line ends with the window's current level, which is useful for checking the stacking.
+for example `setLevel(top) TaoWindow … level=25 cb=0x151`, `miniaturize->hide`, `deminiaturize->show`, `orderOut->quit`, `JS auto camera -> FaceTime HD-Kamera`, `JS no face -> showing smile`, `tray menu installed`, `JS auto start`, `JS user stop`, `state running`, `menu exit->quit`, `ghost show (camera request while hidden)` / `ghost hide`, `overlay centered`, `started by login item`, `launch: main window kept hidden`, `reopen -> open main window`, `autostart on/off: ok`, `already running (pid N), quitting`, `screen time: N bytes of log, N days from <date>`, `JS face: …`, `JS detection quality …`, `JS camera change -> restarting monitoring with …`, `JS about closed -> monitoring resumed`, `export <path>: ok`. Each line ends with the window's current level, which is useful for checking the stacking.
 
 - **Nothing is logged at all:** the library didn't load. Check `otool -L eyeREST.app/Contents/MacOS/eyerest | grep fsaux` and `codesign -vv eyeREST.app`.
 - **The app crashes at launch after an update:** run `log show --last 2m --predicate 'process == "eyerest"' | grep -iE "dyld|amfi|sandbox"`. Usual causes: a new version needs an entitlement that `ents.plist` doesn't have (compare it with `codesign -d --entitlements - eyeREST.app.orig`), or not enough header space for the load command (`insert_dylib.py` stops with an error in that case). The hardened runtime is not a problem: re-signing without `--options runtime` turns it off.

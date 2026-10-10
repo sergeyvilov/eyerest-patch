@@ -233,6 +233,27 @@
     return true;
   }
   window.__fsaux = { start, stop, running };
+  // "About eyeREST" in the menu: the app's info page (its footer's robot icon).
+  // The app replaces its main page with the info page, which stops
+  // monitoring; after its Close, monitoring starts again if it was running.
+  window.__fsaux.about = () => {
+    if (panel && !panel.hidden) { panel.hidden = true; hideTip(); }
+    const bot = document.querySelector('svg.lucide-bot');
+    if (!bot) return;
+    const resume = running();
+    bot.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    if (!resume) return;
+    // The info page is laid over the main page; it's open while its
+    // heading ("// eyeREST v0.2.0") is there. Give up after 30 min.
+    const infoOpen = () => [...document.querySelectorAll('h1, h2, h3, h4')].some((e) => /eyeREST v\d/.test(e.textContent));
+    let tries = 0, opened = false;
+    const w = workerInterval(() => {
+      if (++tries > 1800) { w.terminate(); return; }
+      if (!opened) { opened = infoOpen(); if (!opened && tries > 10) w.terminate(); return; }
+      if (infoOpen() || running()) { if (running()) w.terminate(); return; }
+      if (start()) { log('about closed -> monitoring resumed'); w.terminate(); }
+    }, 1000);
+  };
 
   // Auto-start shortly after launch, once the camera is selected.
   let autoTries = 0;
@@ -888,7 +909,7 @@
       back.addEventListener('click', () => { panel.hidden = true; hideTip(); });
       const exp = document.createElement('button');
       exp.id = 'fsaux-stats-export';
-      exp.className = 'button button--variant_outline button--size_md';
+      exp.className = 'button button--variant_solid button--size_md';
       exp.style.cssText = 'position:absolute;bottom:16px';
       exp.addEventListener('click', exportCsv);
       const body = document.createElement('div');
