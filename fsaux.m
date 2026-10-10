@@ -664,7 +664,7 @@ static NSString *fsaux_hourlyRateText(void) {
     if (hourlyRate) {
         NSNumberFormatter *f = [NSNumberFormatter new];
         f.locale = [NSLocale localeWithLocaleIdentifier:uiLang];
-        f.minimumFractionDigits = f.maximumFractionDigits = 1;
+        f.maximumFractionDigits = 0;
         v = [f stringFromNumber:hourlyRate];
     }
     return [NSString stringWithFormat:fsaux_menuTexts()[4], v];

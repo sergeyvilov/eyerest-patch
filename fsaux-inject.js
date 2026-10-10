@@ -580,7 +580,7 @@
     let blinks = 0, sec = 0;
     for (const [k, b] of hourBuckets) if (k > m - 60) { blinks += b.blinks; sec += b.sec; }
     // Shown as soon as there is any usable time (no minimum, unlike the statistics).
-    return sec > 0 ? Math.round((10 * blinks) / (sec / 60)) / 10 : null;
+    return sec > 0 ? Math.round(blinks / (sec / 60)) : null;
   }
 
   // Every time the smile appears (fsaux.m), except the no-face smile.
@@ -866,14 +866,14 @@
     body.textContent = '';
     const now7 = span(7, 0), prev7 = span(14, 7);
     const pct = (v) => (v == null ? '—' : Math.round(v) + ' %');
-    const rate = (v) => (v == null ? '—' : v.toFixed(1) + t('perMin'));
+    const rate = (v) => (v == null ? '—' : Math.round(v) + t('perMin'));
     const rateSplit = (s) => rate(s.rate) + (s.rate != null && s.incomplete != null ? ' (' + t('incomplete').replace('{p}', s.incomplete) + ')' : '');
     body.append(
       section(t('covTitle'), t('covSub'),
         grid(coverage, GREENS, 100, (v, d) => Math.round(v) + ' % (' + fmtDur(d.track) + ' ' + t('of') + ' ' + fmtDur(d.screen) + ')'),
         t('last7') + ': ' + pct(now7.cov) + '  ·  ' + t('prev7') + ': ' + pct(prev7.cov)),
       section(t('blinkTitle'), t('blinkSub'),
-        grid(blinkRate, BLUES, 0, (v, d) => v.toFixed(1) + t('perMin') + incompleteText(incompleteShare(d.blinks || 0, d.fullBlinks))),
+        grid(blinkRate, BLUES, 0, (v, d) => Math.round(v) + t('perMin') + incompleteText(incompleteShare(d.blinks || 0, d.fullBlinks))),
         t('last7') + ': ' + rateSplit(now7) + '  ·  ' + t('prev7') + ': ' + rateSplit(prev7)),
     );
   }
