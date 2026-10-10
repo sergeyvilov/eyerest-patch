@@ -579,7 +579,8 @@
     const m = Math.floor(Date.now() / 60000);
     let blinks = 0, sec = 0;
     for (const [k, b] of hourBuckets) if (k > m - 60) { blinks += b.blinks; sec += b.sec; }
-    return sec >= MIN_BLINK_SEC ? Math.round((10 * blinks) / (sec / 60)) / 10 : null;
+    // Shown as soon as there is any usable time (no minimum, unlike the statistics).
+    return sec > 0 ? Math.round((10 * blinks) / (sec / 60)) / 10 : null;
   }
 
   // Every time the smile appears (fsaux.m), except the no-face smile.

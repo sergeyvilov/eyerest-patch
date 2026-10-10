@@ -12,7 +12,7 @@ Patches the Mac App Store build of **eyeREST** (`com.vinlemon.eyeREST`, tested w
 - **Starts hidden, monitoring on.** At launch the main window stays hidden and monitoring starts by itself, even if it was stopped before quitting. The window does show at launch while the camera permission or the app's first-run intro is still pending.
 - **Run at startup** checkbox at the bottom of the Popup section, which is only as tall as its content. eyeREST then starts at login, and it appears in System Settings → General → Login Items. If macOS asks you to allow it there, the checkbox says so. The app's own autostart can't work inside the macOS sandbox.
 - **Glasses icon menu** (left or right click):
-  - a non-clickable line with the **hourly rate**: blinks per minute over the last hour, or "—" with under 5 minutes of data;
+  - a non-clickable line with the **hourly rate**: blinks per minute over the last hour (a sliding 60-minute window over usable time), shown as soon as there is any usable time;
   - **Open**, **Start** and **Stop** (greyed out when they don't apply);
   - **About eyeREST** (the app's info page; monitoring resumes after Close);
   - **Exit**.
