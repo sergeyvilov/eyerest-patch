@@ -4,6 +4,10 @@
 
 Patches the Mac App Store build of **eyeREST** (`com.vinlemon.eyeREST`, tested with 0.2.0 / build 20241021.195631). Everything the patch adds follows the app's language (English, German, Italian, Spanish, Russian, Japanese, Chinese).
 
+| Main window | Statistics | Menu |
+|---|---|---|
+| ![Main window](screenshots/main-window.png) | ![Statistics](screenshots/statistics.png) | ![Menu](screenshots/menu.png) |
+
 ## Features
 
 ### App, window and menu
@@ -107,9 +111,9 @@ After installing, macOS will probably ask for **camera access** again, because t
 | `ents.plist` | Entitlements for the ad-hoc re-signature: sandbox, camera, network client, read-only access to `/private/var/log/powermanagement/` (for screen time), and read/write access to files the user picks in a save dialog (CSV export) |
 | `patch.sh` | Full pipeline: back up, compile, inject, edit Info.plist, re-sign |
 | `com.vinlemon.eyeREST.fsaux-autostart.plist` | Login item for "Run at startup", copied to `Contents/Library/LaunchAgents/`. It runs the app's binary with `--fsaux-autostart` |
+| `screenshots/` | The screenshots above |
 | `install.sh` | Copies the patched app (or `restore`: the original) into `/Applications` |
 | `eyeREST.app.orig` | Untouched backup of the original app (made by `patch.sh`, not in the repository) |
-| `orig-ents.plist` | The original App Store entitlements, kept for reference |
 | `frontend/` | Local dump of the app's web frontend (minified JS/CSS), used to find the hooks below. Not in the repository, because it is the app's own code |
 
 ## How it works
