@@ -11,7 +11,7 @@
 // 3. Start/stop: monitoring starts by itself every time the app opens, also
 //    after a manual Stop. The menu-bar menu (fsaux.m) calls
 //    window.__fsaux.start()/stop().
-// 4. Usage statistics: a "Statistics" button in the footer opens two
+// 4. Usage statistics: "See statistics" below the blink counter opens two
 //    GitHub-style yearly grids, one square per day: the share of screen-on
 //    time with monitoring running, and spontaneous blinks per minute while
 //    the face is found and not looking down, without blinks right after a
@@ -575,7 +575,8 @@
   const LOCALES = { en: 'en-US', de: 'de-DE', it: 'it-IT', es: 'es-ES', ru: 'ru-RU', ja: 'ja-JP', zh: 'zh-CN' };
   const locale = () => LOCALES[lang()] || 'en-US';
   const T = {
-    stats: { en: 'Statistics', de: 'Statistik', it: 'Statistiche', es: 'Estadísticas', ru: 'Статистика', ja: '統計', zh: '统计' },
+    seeStats: { en: 'See statistics', de: 'Statistik ansehen', it: 'Vedi statistiche', es: 'Ver estadísticas', ru: 'Посмотреть статистику', ja: '統計を見る', zh: '查看统计' },
+    back: { en: 'Back', de: 'Zurück', it: 'Indietro', es: 'Atrás', ru: 'Назад', ja: '戻る', zh: '返回' },
     autostart: { en: 'Run at startup', de: 'Beim Systemstart ausführen', it: "Avvia all'accensione", es: 'Abrir al iniciar sesión', ru: 'Запускать при входе в систему', ja: 'ログイン時に起動', zh: '登录时启动' },
     approval: {
       en: 'allow eyeREST in System Settings → General → Login Items',
@@ -608,7 +609,6 @@
     },
     noData: { en: 'no data', de: 'keine Daten', it: 'nessun dato', es: 'sin datos', ru: 'нет данных', ja: 'データなし', zh: '无数据' },
     of: { en: 'of', de: 'von', it: 'su', es: 'de', ru: 'из', ja: '/', zh: '/' },
-    blinksIn: { en: 'blinks in', de: 'Blinzler in', it: 'battiti in', es: 'parpadeos en', ru: 'морганий за', ja: '回 /', zh: '次 /' },
     perMin: { en: '/min', de: '/min', it: '/min', es: '/min', ru: '/мин', ja: '/分', zh: '/分钟' },
     last7: { en: 'Last 7 days', de: 'Letzte 7 Tage', it: 'Ultimi 7 giorni', es: 'Últimos 7 días', ru: 'Последние 7 дней', ja: '直近7日間', zh: '最近7天' },
     prev7: { en: 'previous 7 days', de: 'vorherige 7 Tage', it: '7 giorni precedenti', es: '7 días anteriores', ru: 'предыдущие 7 дней', ja: 'その前の7日間', zh: '之前7天' },
@@ -788,8 +788,7 @@
         grid(coverage, GREENS, 100, (v, d) => Math.round(v) + ' % (' + fmtDur(d.track) + ' ' + t('of') + ' ' + fmtDur(d.screen) + ')'),
         t('last7') + ': ' + pct(now7.cov) + '  ·  ' + t('prev7') + ': ' + pct(prev7.cov)),
       section(t('blinkTitle'), t('blinkSub'),
-        grid(blinkRate, BLUES, 0, (v, d) => v.toFixed(1) + t('perMin') + ' (' + (d.blinks || 0) + ' ' + t('blinksIn') + ' ' + fmtDur(d.blinkSec) +
-          incompleteText(incompleteShare(d.blinks || 0, d.fullBlinks)) + ')'),
+        grid(blinkRate, BLUES, 0, (v, d) => v.toFixed(1) + t('perMin') + incompleteText(incompleteShare(d.blinks || 0, d.fullBlinks))),
         t('last7') + ': ' + rateSplit(now7) + '  ·  ' + t('prev7') + ': ' + rateSplit(prev7)),
     );
   }
@@ -800,16 +799,19 @@
       // Covers the content between the title bar and the footer.
       panel.style.cssText = 'position:fixed;left:16px;right:16px;top:57px;bottom:44px;z-index:1000;overflow:auto;' +
         'padding:16px 18px;border:1px dashed #000;background:' + (getComputedStyle(document.body).backgroundColor || '#fff');
-      const close = document.createElement('button');
-      close.textContent = '✕';
-      close.style.cssText = 'position:absolute;right:12px;top:10px;font-size:16px;cursor:pointer;background:none;border:none';
-      close.addEventListener('click', () => { panel.hidden = true; hideTip(); });
+      // A "Back" button in the app's own button style, lower right.
+      const back = document.createElement('button');
+      back.id = 'fsaux-stats-back';
+      back.className = 'button button--variant_solid button--size_md';
+      back.style.cssText = 'position:absolute;right:18px;bottom:16px';
+      back.addEventListener('click', () => { panel.hidden = true; hideTip(); });
       const body = document.createElement('div');
       body.className = 'fsaux-stats-body';
-      panel.append(close, body);
+      panel.append(body, back);
       document.body.appendChild(panel);
     }
     panel.hidden = false;
+    panel.querySelector('#fsaux-stats-back').textContent = t('back');
     renderStats();
     requestScreenTime();
   }
@@ -819,19 +821,22 @@
     if (!document.hidden && panel && !panel.hidden) { panel.hidden = true; hideTip(); }
   });
 
-  // The footer ("// eyeREST: Comfort Vision" ... bot icon) gets a button.
+  // "See statistics" below the app's blink counter ("Blinks: N  Reset").
   function addStatsButton() {
     const old = document.getElementById('fsaux-stats-btn');
-    if (old) { if (old.textContent !== t('stats')) old.textContent = t('stats'); return; }
-    const bot = document.querySelector('svg.lucide-bot');
-    if (!bot || !bot.parentElement) return;
+    if (old) { if (old.textContent !== t('seeStats')) old.textContent = t('seeStats'); return; }
+    const counter = document.querySelector('.alert__description code');
+    const row = counter && counter.parentElement;
+    if (!row || !row.parentElement) return;
     const b = document.createElement('button');
     b.id = 'fsaux-stats-btn';
-    b.className = 'text textStyle_xs';
-    b.style.cssText = 'margin-left:auto;margin-right:12px;cursor:pointer;background:none;border:none;text-decoration:underline';
-    b.textContent = t('stats');
-    b.addEventListener('click', () => (panel && !panel.hidden ? (panel.hidden = true, hideTip()) : openStats()));
-    bot.parentElement.insertBefore(b, bot);
+    b.className = 'text textStyle_sm';
+    // A compact text link (a full-size button would push the panel's content
+    // out of the fixed-size window).
+    b.style.cssText = 'align-self:flex-start;margin-top:-4px;padding:0;height:auto;line-height:1.2;background:none;border:none;cursor:pointer;text-decoration:underline;font-weight:600';
+    b.textContent = t('seeStats');
+    b.addEventListener('click', () => openStats());
+    row.after(b);
   }
   new MutationObserver(addStatsButton).observe(document.documentElement, { childList: true, subtree: true });
 
@@ -850,7 +855,7 @@
       box = document.createElement('label');
       box.id = 'fsaux-autostart';
       box.className = 'text textStyle_xs';
-      box.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:2px;margin-top:10px;cursor:pointer';
+      box.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:2px;margin-top:4px;cursor:pointer';
       box.innerHTML = '<span style="display:flex;align-items:center;gap:6px"><input type="checkbox" style="width:14px;height:14px;cursor:pointer"><span></span></span><span style="color:#57606a"></span>';
       box.querySelector('input').addEventListener('change', (e) => post({ cmd: 'autostart', on: e.target.checked }));
       row.parentElement.insertBefore(box, row.nextSibling);

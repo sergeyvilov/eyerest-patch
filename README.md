@@ -15,9 +15,9 @@ Patches the Mac App Store build of **eyeREST** (`com.vinlemon.eyeREST`, tested w
 
 9. **The smile is always centered** on the screen you're working on, also after switching between a big and a small display, with no restart needed.
 
-10. **Usage statistics.** A **Statistik** (Statistics) link in the window's footer opens two GitHub-style grids covering the past year, one square per day. Hovering a square shows that day's value:
+10. **Usage statistics.** **See statistics**, below the app's blink counter, opens two GitHub-style grids covering the past year, one square per day. **Back** (lower right) returns to the main view. Hovering a square shows that day's value:
     - **Monitoring time:** the share of the day's screen-on time with monitoring running, e.g. "63 % (4 h 12 min of 6 h 40 min)". Screen-on time comes from the macOS power log (`pmset -g log`), so time when eyeREST wasn't running counts too.
-    - **Blinks per minute:** your spontaneous blink rate, all blinks, with the share of incomplete ones, e.g. "14.2/min (426 blinks in 30 min, 38% incomplete)". More is better; at a screen it typically drops well below the normal 15 to 20. Only time while your face is found and you look at the screen counts. Time spent **looking down** (writing, reading notes, the keyboard) is left out, and so are blinks right after a smile (the first blink after it, and any within 3 s), because those answer the smile instead of coming by themselves. A day needs 5 minutes of such time to get a value. See *Blink and gaze detection* below.
+    - **Blinks per minute:** your spontaneous blink rate, all blinks, with the share of incomplete ones, e.g. "14.2/min, 38% incomplete". More is better; at a screen it typically drops well below the normal 15 to 20. Only time while your face is found and you look at the screen counts. Time spent **looking down** (writing, reading notes, the keyboard) is left out, and so are blinks right after a smile (the first blink after it, and any within 3 s), because those answer the smile instead of coming by themselves. A day needs 5 minutes of such time to get a value. See *Blink and gaze detection* below.
 
     Below each grid are the averages for the last 7 days and the 7 days before, weighted by time and using only days that show a value themselves. Recording starts when the patched app first runs, and earlier days show as "no data".
 
@@ -37,7 +37,7 @@ The app's face model (MediaPipe Face Landmarker, about 13 frames per second) bui
 - **Looking down:** head pitch in degrees from the forehead (10) and chin (152) points in 3D, compared with the usual pitch for the camera in use: the 30th percentile of the last 5 minutes. A camera above the screen sees you looking down all the time, so a fixed threshold doesn't work. 12° or more above the usual pitch counts as looking down. In a test, writing on paper was about +25° and the keyboard about +15°. Irises clearly lower in the eyes (0.12 eye widths) count too. Frames up to 1.5 s after looking down don't count either.
 - The log shows a `face:` line every 10 s while monitoring, with frames, pitch, iris, EAR, and detected/counted blinks.
 
-14. **All of the patch's texts follow the app's language** (English, German, Italian, Spanish, Russian, Japanese, Chinese): the statistics, the "Run at startup" checkbox, the footer link and the exit dialog. Reopening the window always shows the main view, even if the statistics were open before.
+14. **All of the patch's texts follow the app's language** (English, German, Italian, Spanish, Russian, Japanese, Chinese): the statistics, the "Run at startup" checkbox, the statistics link and the exit dialog. Reopening the window always shows the main view, even if the statistics were open before.
 
 15. **4-second pop-up timer.** The timer choice gets a **4s** button between 3s and 5s, labeled in the app's language (4s, 4с, 4秒, …). The app's list of timer buttons can't be extended, but the setting accepts any number of seconds. Choosing 4s saves it and reloads the app's page (about 2 s), since the app reads its settings only at start. Monitoring restarts by itself.
 
