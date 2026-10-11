@@ -21,7 +21,7 @@ fi
 
 echo "==> Compiling libfsaux.dylib"
 clang -arch arm64 -arch x86_64 -mmacosx-version-min=10.13 -dynamiclib -fobjc-arc \
-    -framework AppKit -framework WebKit -framework ServiceManagement -install_name @executable_path/libfsaux.dylib \
+    -framework AppKit -framework WebKit -framework ServiceManagement -framework AVFoundation -install_name @executable_path/libfsaux.dylib \
     -o libfsaux.dylib fsaux.m
 
 echo "==> Building patched $OUT"

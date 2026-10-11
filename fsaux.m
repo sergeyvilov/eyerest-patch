@@ -25,6 +25,7 @@
 #import <objc/message.h>
 #import <WebKit/WebKit.h>
 #import <ServiceManagement/ServiceManagement.h>
+#import <AVFoundation/AVFoundation.h>
 
 static const NSWindowCollectionBehavior kAdd =
     NSWindowCollectionBehaviorCanJoinAllSpaces |
@@ -538,6 +539,22 @@ static void fsaux_sendScreenState(void) {
         (screenAsleep || sessionLocked) ? @"false" : @"true"]);
 }
 
+// WebKit holds back the page's "devicechange" event while the window is
+// hidden, so camera plugs/unplugs are reported to the JS from here.
+static void fsaux_observeCameras(void) {
+    NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
+    for (NSNotificationName name in @[AVCaptureDeviceWasConnectedNotification, AVCaptureDeviceWasDisconnectedNotification]) {
+        [nc addObserverForName:name object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
+            AVCaptureDevice *dev = n.object;
+            if ([dev isKindOfClass:[AVCaptureDevice class]] && ![dev hasMediaType:AVMediaTypeVideo]) return;
+            fsaux_log(nil, [NSString stringWithFormat:@"camera %@: %@",
+                [name isEqual:AVCaptureDeviceWasConnectedNotification] ? @"connected" : @"disconnected",
+                [dev isKindOfClass:[AVCaptureDevice class]] ? dev.localizedName : @"?"]);
+            fsaux_runJS(@"window.__fsaux && window.__fsaux.cameraChanged && window.__fsaux.cameraChanged()");
+        }];
+    }
+}
+
 static void fsaux_observeScreenState(void) {
     NSNotificationCenter *wc = [[NSWorkspace sharedWorkspace] notificationCenter];
     [wc addObserverForName:NSWorkspaceScreensDidSleepNotification object:nil queue:nil usingBlock:^(NSNotification *n) {
@@ -758,6 +775,7 @@ __attribute__((constructor)) static void fsaux_init(void) {
     fsaux_observeMainWindowFocus();
     fsaux_observeScreenChanges();
     fsaux_observeScreenState();
+    fsaux_observeCameras();
     dispatch_async(dispatch_get_main_queue(), ^{ fsaux_hookTrayWhenReady(); fsaux_hookReopenWhenReady(); });
     origWebViewInit = swizzle([WKWebView class], @selector(initWithFrame:configuration:), hookWebViewInit);
     Class w = [NSWindow class];

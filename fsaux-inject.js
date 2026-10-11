@@ -105,17 +105,33 @@
     return { ...c, video: { ...c.video, deviceId: { exact: deviceId } } };
   }
 
+  const pendingRequests = new Set();  // start times of camera requests still waiting for an answer
   md.getUserMedia = async (c) => {
     // WebKit only grants camera requests while the page is visible; ask the
     // native side to put the hidden window on screen invisibly meanwhile.
     const ghost = document.hidden;
     if (ghost) post({ cmd: 'ghost', on: true });
+    const req = { at: Date.now() };
+    pendingRequests.add(req);
     try { return await getUserMediaInner(c); }
     catch (e) { log('getUserMedia failed: ' + e); throw e; }
-    finally { if (ghost) post({ cmd: 'ghost', on: false }); }
+    finally { pendingRequests.delete(req); if (ghost) post({ cmd: 'ghost', on: false }); }
   };
+  // Sometimes a camera request never answers (e.g. a USB camera still held by
+  // a process that just quit); monitoring then looks on but gets no images.
+  // After STUCK_MS such a request is given up and monitoring restarted.
+  const STUCK_MS = 12000;
+  workerInterval(() => {
+    if (restarting) return;
+    const stuck = [...pendingRequests].filter((r) => Date.now() - r.at > STUCK_MS);
+    if (!stuck.length) return;
+    for (const r of stuck) pendingRequests.delete(r);  // given up; if one answers later, nothing waits for it
+    restartMonitoring('camera request stuck');
+  }, 3000);
+  let cameraLabel = '';  // camera of the running stream, for the statistics
+  const noteCamera = (stream) => { const v = stream && stream.getVideoTracks()[0]; if (v && v.label) cameraLabel = v.label; };
   async function getUserMediaInner(c) {
-    if (!wantsAuto(c)) return origGetUserMedia(c);
+    if (!wantsAuto(c)) { const s = await origGetUserMedia(c); noteCamera(s); return s; }
     await listCams();
     const b = best();
     if (!b) throw new DOMException('No camera connected', 'NotFoundError');
@@ -125,6 +141,7 @@
     if (vs && vs.width && vs.height) { videoW = vs.width; videoH = vs.height; }
     // The camera went away (unplugged, display detached) without a devicechange.
     for (const t of stream.getVideoTracks()) t.addEventListener('ended', () => scheduleCameraCheck('camera ended'));
+    noteCamera(stream);
     log('auto camera -> ' + b.label);
     refreshLabels();
     return stream;
@@ -140,13 +157,19 @@
     checkTimer = workerInterval(() => { checkTimer.terminate(); checkTimer = null; checkCamera(why); }, 1500);
   }
   async function checkCamera(why) {
-    await listCams();
+    // WebKit may also hold back the device list while the window is hidden.
+    const ghost = document.hidden;
+    if (ghost) post({ cmd: 'ghost', on: true });
+    try { await listCams(); } finally { if (ghost) post({ cmd: 'ghost', on: false }); }
     refreshLabels();
     const b = best();
     const ended = why === 'camera ended';
     if (restarting || !running() || !b || (b.deviceId === current && !ended)) return;
+    restartMonitoring(why, b.label);
+  }
+  function restartMonitoring(why, label) {
     restarting = true;
-    log(why + ' -> restarting monitoring with ' + b.label);
+    log(why + ' -> restarting monitoring' + (label ? ' with ' + label : ''));
     stop();
     let tries = 0;
     const retry = workerInterval(() => {
@@ -154,6 +177,9 @@
     }, 1000);
   }
   md.addEventListener('devicechange', () => scheduleCameraCheck('camera change'));
+  // fsaux.m reports plugs/unplugs too: WebKit holds back "devicechange"
+  // while the window is hidden.
+  window.__fsaux_cameraChanged = () => scheduleCameraCheck('camera change');
 
   // The dropdown reads labels only when it mounts; keep the Auto label current.
   function refreshLabels() {
@@ -233,7 +259,7 @@
     b.click();
     return true;
   }
-  window.__fsaux = { start, stop, running };
+  window.__fsaux = { start, stop, running, cameraChanged: () => window.__fsaux_cameraChanged() };
   // "About eyeREST" in the menu: the app's info page (its footer's robot icon).
   // The app replaces its main page with the info page, which stops
   // monitoring; after its Close, monitoring starts again if it was running.
@@ -576,6 +602,7 @@
     const h = thisHour();
     d.track += dt;
     h.track += dt;
+    if (cameraLabel) { h.cams = h.cams || {}; h.cams[cameraLabel] = (h.cams[cameraLabel] || 0) + dt; }
     if (!noFace()) {
       d.blinkSec = (d.blinkSec || 0) + dt * usableShare;
       h.blinkSec = (h.blinkSec || 0) + dt * usableShare;
@@ -919,14 +946,17 @@
   function writeCsv() {
     exportPending = false;
     const r1 = (v) => (v == null ? '' : String(Math.round(v * 10) / 10));
-    const rows = [['hour', 'screen_min', 'monitoring_min', 'monitoring_pct', 'blink_measured_min', 'blinks', 'complete_blinks', 'incomplete_blinks', 'blinks_per_min', 'incomplete_pct'].join(',')];
+    // Camera: the one used longest in that hour; several joined by " + ".
+    const csvText = (s) => (/[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s);
+    const cameraOf = (h) => csvText(Object.entries(h.cams || {}).sort((a, b) => b[1] - a[1]).map((e) => e[0]).join(' + '));
+    const rows = [['hour', 'camera', 'screen_min', 'monitoring_min', 'monitoring_pct', 'blink_measured_min', 'blinks', 'complete_blinks', 'incomplete_blinks', 'blinks_per_min', 'incomplete_pct'].join(',')];
     for (const k of Object.keys(stats.hours).sort()) {
       const h = stats.hours[k];
       if (!h.screen && !h.track) continue;
       const known = stats.hoursSince && k >= stats.hoursSince;
       const blinks = h.blinks || 0, full = known ? h.fullBlinks || 0 : null, sec = h.blinkSec || 0;
       rows.push([
-        k + ':00', r1(h.screen / 60),
+        k + ':00', cameraOf(h), r1(h.screen / 60),
         known ? r1(h.track / 60) : '', known && h.screen ? r1(Math.min(100, (100 * h.track) / h.screen)) : '',
         known ? r1(sec / 60) : '', known ? blinks : '', known ? full : '', known ? blinks - full : '',
         known && sec ? r1(blinks / (sec / 60)) : '', known ? r1(incompleteShare(blinks, full)) : '',
