@@ -26,8 +26,8 @@
 - **A 4-second timer**, in addition to 3, 5, 10 and 15 seconds.
 
 ### 📊 See your progress
-- **Live counters** for total, complete and incomplete blinks.
-- **Your current blink rate** right in the menu bar menu (blinks per minute over the last 10 minutes).
+- **Live counters** for total, complete and incomplete blinks, with the share of each.
+- **Your current blink rate** right in the menu bar menu (blinks per minute over the last 10 minutes), updating live while the menu is open.
 - **GitHub-style yearly charts:** how much of your screen time eyeREST was watching over you, and how often you blink, day by day, with 7-day trends.
 - **CSV export** with hourly data, ready for your own analysis.
 

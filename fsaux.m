@@ -196,6 +196,8 @@ static void fsaux_quit(NSWindow *w, NSString *why) {
 // The alert runs on the next run-loop turn, outside tao's event handler.
 static NSString *uiLang = @"en";  // app language code, reported by the JS
 static NSNumber *currentRate;       // blinks per minute over the last 10 minutes, from the JS (nil = no data)
+static NSMenuItem *rateItem;       // the menu's current-rate line (set once the menu exists)
+static NSString *fsaux_currentRateText(void);
 
 // Exit dialog texts: title, message, quit, cancel.
 static NSArray<NSString *> *fsaux_quitTexts(void) {
@@ -378,6 +380,8 @@ static void fsaux_ghost(NSWindow *w, BOOL on) {
         monitoringRunning = [d[@"running"] boolValue];
         if ([d[@"lang"] isKindOfClass:[NSString class]]) uiLang = d[@"lang"];
         currentRate = [d[@"rate"] isKindOfClass:[NSNumber class]] ? d[@"rate"] : nil;
+        // Live, also while the menu is open.
+        if (rateItem) rateItem.title = fsaux_currentRateText();
         if (!logged || was != monitoringRunning) fsaux_log(m.webView.window, monitoringRunning ? @"state running" : @"state stopped");
         logged = YES;
     } else if ([cmd isEqual:@"ghost"]) {
@@ -698,7 +702,6 @@ static NSString *fsaux_currentRateText(void) {
 
 static void fsaux_showTrayMenu(NSView *view) {
     static NSMenu *menu;
-    static NSMenuItem *rateItem;
     static NSArray<NSMenuItem *> *items;
     if (!menu) {
         id target = fsaux_menuTarget();

@@ -1013,6 +1013,11 @@
     if (!box) return;
     const vals = [sessionTotal, sessionFull, sessionTotal - sessionFull];
     box.querySelectorAll('code').forEach((c, i) => { const v = String(vals[i]); if (c.textContent !== v) c.textContent = v; });
+    // Share of the total next to complete and incomplete blinks.
+    box.querySelectorAll('.fsaux-share').forEach((s) => {
+      const v = sessionTotal ? Math.round((100 * vals[+s.dataset.i]) / sessionTotal) + ' %' : '';
+      if (s.textContent !== v) s.textContent = v;
+    });
   }
   let wasRunning = false;
   workerInterval(() => {
@@ -1030,7 +1035,7 @@
     if (!box) {
       box = document.createElement('div');
       box.id = 'fsaux-counters';
-      box.style.cssText = 'display:grid;grid-template-columns:auto auto;justify-content:start;align-items:center;column-gap:6px;row-gap:2px';
+      box.style.cssText = 'display:grid;grid-template-columns:auto auto auto;justify-content:start;align-items:center;column-gap:6px;row-gap:2px';
       // Space is tight in the fixed-size window: less gap above the block.
       if (row.parentElement.style.gap !== '6px') row.parentElement.style.gap = '6px';
       for (const k of ['total', 'full', 'part']) {
@@ -1040,18 +1045,23 @@
         const value = document.createElement('code');
         value.className = counter.className + ' fsaux-count';
         value.style.cssText = 'justify-self:end;min-width:3.2em;text-align:right;padding-block:0;height:22px;line-height:20px;font-size:14px';
-        box.append(label, value);
+        const share = document.createElement('span');
+        share.className = 'fsaux-share';
+        share.dataset.i = k === 'full' ? 1 : k === 'part' ? 2 : '';
+        share.style.cssText = 'color:#57606a;font-size:13px;min-width:3em;text-align:right';
+        if (k === 'total') share.className = '';
+        box.append(label, value, share);
+        // Reset goes in the Total row's free third column.
+        if (k === 'total' && appReset) {
+          const reset = document.createElement('button');
+          reset.id = 'fsaux-counters-reset';
+          reset.className = appReset.className;
+          reset.style.cssText = 'justify-self:end;padding-inline:0;height:auto';
+          reset.addEventListener('click', () => { appReset.click(); sessionTotal = 0; sessionFull = 0; updateCounters(); });
+          share.replaceWith(reset);
+        }
       }
       row.before(box);
-      // Reset on its own line below the counters.
-      if (appReset) {
-        const reset = document.createElement('button');
-        reset.id = 'fsaux-counters-reset';
-        reset.className = appReset.className;
-        reset.style.cssText = 'align-self:flex-end;padding-inline:0;margin-top:2px';
-        reset.addEventListener('click', () => { appReset.click(); sessionTotal = 0; sessionFull = 0; updateCounters(); });
-        box.after(reset);
-      }
       updateCounters();
       addCountersInfo(box);
     }
@@ -1078,6 +1088,7 @@
     btn.innerHTML = appInfo.innerHTML;
     btn.style.cssText = 'position:absolute;top:8px;right:8px';
     if (getComputedStyle(card).position === 'static') card.style.position = 'relative';
+    content.style.paddingRight = '28px';  // keep the card's text clear of the "i"
     btn.addEventListener('click', openCountersInfo);
     card.appendChild(btn);
   }
@@ -1235,10 +1246,12 @@
       line.style.cssText = 'margin-top:4px;font-size:13px;line-height:1.3';
       box.after(line);
     }
+    // The hint stays on one line (the Camera section has no room for two),
+    // cut off with "…" if needed; the full text shows on hover.
     const want = '<span style="color:' + QUALITY_COLORS[quality.level] + '">●</span> ' + t('quality') + ': ' + t(quality.level) +
-      (quality.level === 'good' ? '' : '<div style="color:#57606a;font-size:12px">' + t('qualityHint') + '</div>');
+      (quality.level === 'good' ? '' : '<div style="color:#57606a;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + t('qualityHint') + '</div>');
     if (line.innerHTML !== want) line.innerHTML = want;
-    line.title = quality.gap + ' px, ' + quality.angle + '°';
+    line.title = (quality.level === 'good' ? '' : t('qualityHint') + ' — ') + quality.gap + ' px, ' + quality.angle + '°';
   }
   new MutationObserver(() => { if (quality && !document.getElementById('fsaux-quality')) addQualityLine(); }).observe(document.documentElement, { childList: true, subtree: true });
 
