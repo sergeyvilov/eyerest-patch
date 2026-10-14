@@ -50,6 +50,7 @@ static void (*origDeminiaturize)(id, SEL, id);
 static BOOL (*origIsMiniaturized)(id, SEL);
 
 // Log file: ~/Library/Containers/com.vinlemon.eyeREST/Data/tmp/fsaux.log
+static const unsigned long long kLogMaxBytes = 2 * 1024 * 1024;
 static void fsaux_log(NSWindow *w, NSString *what) {
     NSString *p = [NSTemporaryDirectory() stringByAppendingPathComponent:@"fsaux.log"];
     NSString *line = [NSString stringWithFormat:@"%@ %@ %@ title=%@ level=%ld cb=0x%lx style=0x%lx frame=%@\n",
@@ -57,7 +58,18 @@ static void fsaux_log(NSWindow *w, NSString *what) {
         (unsigned long)w.collectionBehavior, (unsigned long)w.styleMask, NSStringFromRect(w.frame)];
     NSFileHandle *h = [NSFileHandle fileHandleForWritingAtPath:p];
     if (!h) { [line writeToFile:p atomically:NO encoding:NSUTF8StringEncoding error:nil]; return; }
-    [h seekToEndOfFile]; [h writeData:[line dataUsingEncoding:NSUTF8StringEncoding]]; [h closeFile];
+    // Capped: at 2 MB the log becomes fsaux.log.old (replacing the previous
+    // one) and a new log starts, so at most about 4 MB are kept.
+    if ([h seekToEndOfFile] > kLogMaxBytes) {
+        [h closeFile];
+        NSString *old = [p stringByAppendingString:@".old"];
+        NSFileManager *fm = [NSFileManager defaultManager];
+        [fm removeItemAtPath:old error:nil];
+        [fm moveItemAtPath:p toPath:old error:nil];
+        [line writeToFile:p atomically:NO encoding:NSUTF8StringEncoding error:nil];
+        return;
+    }
+    [h writeData:[line dataUsingEncoding:NSUTF8StringEncoding]]; [h closeFile];
 }
 
 static BOOL fsaux_isTao(NSWindow *w) {

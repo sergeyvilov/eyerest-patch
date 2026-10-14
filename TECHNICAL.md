@@ -193,6 +193,8 @@ The library writes a line every time it acts to
 ~/Library/Containers/com.vinlemon.eyeREST/Data/tmp/fsaux.log
 ```
 
+(capped: at 2 MB it becomes `fsaux.log.old`, replacing the previous one, and a new log starts)
+
 for example `setLevel(top) TaoWindow … level=25 cb=0x151`, `miniaturize->hide`, `deminiaturize->show`, `orderOut->quit`, `JS auto camera -> FaceTime HD-Kamera`, `JS no face -> showing smile`, `tray menu installed`, `JS auto start`, `JS user stop`, `state running`, `menu exit->quit`, `ghost show (camera request while hidden)` / `ghost hide`, `overlay centered`, `started by login item`, `launch: main window kept hidden`, `reopen -> open main window`, `autostart on/off: ok`, `already running (pid N), quitting`, `screen time: N bytes of log, N days from <date>`, `JS face: …`, `JS detection quality …`, `JS camera change -> restarting monitoring with …`, `camera connected/disconnected: <name>`, `JS camera request stuck -> restarting monitoring`, `JS about closed -> monitoring resumed`, `export <path>: ok`. Each line ends with the window's current level, which is useful for checking the stacking.
 
 - **Nothing is logged at all:** the library didn't load. Check `otool -L eyeREST.app/Contents/MacOS/eyerest | grep fsaux` and `codesign -vv eyeREST.app`.
