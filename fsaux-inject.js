@@ -1063,18 +1063,27 @@
         const known = h && stats.hoursSince && k >= stats.hoursSince;
         let v = null;
         if (which === 'cov') v = known && h.screen >= 60 ? Math.min(100, (100 * h.track) / h.screen) : null;
-        else v = known && h.blinkSec >= 120 ? (h.blinks || 0) / (h.blinkSec / 60) : null;
+        else v = known && h.blinkSec >= 120 ? blinkKind(h, which) / (h.blinkSec / 60) : null;
         pts.push({ t: s.getTime() + HOUR / 2, v, d: h, hour: true });
       }
     } else {
       for (let s = new Date(start); s < end; s.setDate(s.getDate() + 1)) {
         s.setHours(0, 0, 0, 0);
         const k = dayKey(s), d = stats.days[k];
-        const v = !d || k < stats.since ? null : which === 'cov' ? coverage(d) : blinkRate(d);
+        const v = !d || k < stats.since ? null : which === 'cov' ? coverage(d)
+          : blinkRate(d) == null ? null : blinkKind(d, which) == null ? null : blinkKind(d, which) / (d.blinkSec / 60);
         pts.push({ t: s.getTime() + DAY / 2, v, d, hour: false });
       }
     }
     return pts;
+  }
+  // Blinks of one kind in an entry: all, complete or incomplete (null if the
+  // entry predates the complete/incomplete split).
+  function blinkKind(e, which) {
+    const all = e.blinks || 0;
+    if (which === 'blink') return all;
+    if (e.fullBlinks == null) return null;
+    return which === 'full' ? e.fullBlinks : all - e.fullBlinks;
   }
   function niceMax(v) {
     // Divisible by 4, so the 4 gridlines get whole numbers.
@@ -1099,7 +1108,8 @@
     }
     return ticks;
   }
-  function lineChart(pts, start, end, yMax, color, ticksX, describe) {
+  // series: [{pts, color, dash, describe}]
+  function lineChart(series, start, end, yMax, ticksX) {
     const ns = 'http://www.w3.org/2000/svg';
     const W = Math.max(400, panel.querySelector('.fsaux-stats-body').clientWidth), H = 175, L = 40, R = 10, T = 8, B = 22;
     const x = (ms) => L + ((ms - start) / (end - start)) * (W - L - R), y = (v) => T + (1 - v / yMax) * (H - T - B);
@@ -1116,21 +1126,23 @@
       el('line', { x1: x(ms), x2: x(ms), y1: T, y2: H - B, stroke: '#f3f4f6' });
       el('text', { x: x(ms), y: H - 6, 'text-anchor': 'middle', 'font-size': 10, fill: '#57606a' }).textContent = label;
     }
-    // Line with gaps where there's no data.
-    let dpath = '', open = false;
-    for (const p of pts) {
-      if (p.v == null) { open = false; continue; }
-      dpath += (open ? 'L' : 'M') + x(p.t).toFixed(1) + ' ' + y(Math.min(p.v, yMax)).toFixed(1);
-      open = true;
-    }
-    if (dpath) el('path', { d: dpath, fill: 'none', stroke: color, 'stroke-width': 2, 'stroke-linejoin': 'round' });
-    const r = pts.length > 120 ? 1.6 : 3;
-    for (const p of pts) {
-      if (p.v == null) continue;
-      const c = el('circle', { cx: x(p.t), cy: y(Math.min(p.v, yMax)), r, fill: color });
-      const when = p.hour ? new Date(p.t - HOUR / 2).toLocaleString(locale(), { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : fmtDate(new Date(p.t));
-      c.addEventListener('mouseenter', () => { c.setAttribute('r', r + 2); showTip(c, when + ': ' + describe(p)); });
-      c.addEventListener('mouseleave', () => { c.setAttribute('r', r); hideTip(); });
+    for (const { pts, color, dash, describe } of series) {
+      // Line with gaps where there's no data.
+      let dpath = '', open = false;
+      for (const p of pts) {
+        if (p.v == null) { open = false; continue; }
+        dpath += (open ? 'L' : 'M') + x(p.t).toFixed(1) + ' ' + y(Math.min(p.v, yMax)).toFixed(1);
+        open = true;
+      }
+      if (dpath) el('path', { d: dpath, fill: 'none', stroke: color, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-dasharray': dash || 'none' });
+      const r = pts.length > 120 ? 1.6 : 3;
+      for (const p of pts) {
+        if (p.v == null) continue;
+        const c = el('circle', { cx: x(p.t), cy: y(Math.min(p.v, yMax)), r, fill: color });
+        const when = p.hour ? new Date(p.t - HOUR / 2).toLocaleString(locale(), { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : fmtDate(new Date(p.t));
+        c.addEventListener('mouseenter', () => { c.setAttribute('r', r + 2); showTip(c, when + ': ' + describe(p)); });
+        c.addEventListener('mouseleave', () => { c.setAttribute('r', r); hideTip(); });
+      }
     }
     // Drag to move in time, wheel to zoom.
     svg.addEventListener('mousedown', (e) => {
@@ -1159,19 +1171,42 @@
     const ticks = xTicks(start, end, days);
     const cov = chartPoints(start.getTime(), end.getTime(), hourly, 'cov');
     const bl = chartPoints(start.getTime(), end.getTime(), hourly, 'blink');
+    const full = chartPoints(start.getTime(), end.getTime(), hourly, 'full');
+    const part = chartPoints(start.getTime(), end.getTime(), hourly, 'part');
     const maxRate = Math.max(0, ...bl.filter((p) => p.v != null).map((p) => p.v));
     const range = panel.querySelector('.fsaux-chart-range');
     if (range) {
       const o = days <= 1 ? { day: 'numeric', month: 'short', hour: 'numeric' } : { day: 'numeric', month: 'short', year: 'numeric' };
       range.textContent = start.toLocaleString(locale(), o) + ' – ' + end.toLocaleString(locale(), o);
     }
-    const head = (title) => { const h = document.createElement('div'); h.style.cssText = 'font-weight:600;font-size:15px;text-transform:uppercase;margin:6px 0 4px'; h.textContent = title; return h; };
+    const head = (title, legend) => {
+      const h = document.createElement('div');
+      h.style.cssText = 'display:flex;align-items:baseline;gap:14px;margin:6px 0 4px';
+      const tt = document.createElement('span');
+      tt.style.cssText = 'font-weight:600;font-size:15px;text-transform:uppercase';
+      tt.textContent = title;
+      h.appendChild(tt);
+      for (const [color, dash, label] of legend || []) {
+        const l = document.createElement('span');
+        l.style.cssText = 'display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#57606a';
+        l.innerHTML = '<svg width="18" height="6"><line x1="0" y1="3" x2="18" y2="3" stroke="' + color + '" stroke-width="2"' + (dash ? ' stroke-dasharray="' + dash + '"' : '') + '/></svg>';
+        l.append(label);
+        h.appendChild(l);
+      }
+      return h;
+    };
+    const perMin = (p) => Math.round(p.v) + t('perMin');
+    const BLUE = '#08306b', LIGHT = '#4f9bd9', ORANGE = '#f0782b', DASH = '5 4';
     body.append(
       head(t('covTitle')),
-      lineChart(cov, start.getTime(), end.getTime(), 100, '#30a14e', ticks, (p) => Math.round(p.v) + ' %' + (p.d ? ' (' + fmtDur(p.d.track) + ' ' + t('of') + ' ' + fmtDur(p.d.screen) + ')' : '')),
-      head(t('blinkTitle')),
-      lineChart(bl, start.getTime(), end.getTime(), niceMax(maxRate * 1.1), '#2171b5', ticks,
-        (p) => Math.round(p.v) + t('perMin') + incompleteText(incompleteShare(p.d.blinks || 0, p.d.fullBlinks))),
+      lineChart([{ pts: cov, color: '#30a14e', describe: (p) => Math.round(p.v) + ' %' + (p.d ? ' (' + fmtDur(p.d.track) + ' ' + t('of') + ' ' + fmtDur(p.d.screen) + ')' : '') }],
+        start.getTime(), end.getTime(), 100, ticks),
+      head(t('blinkTitle'), [[BLUE, '', t('totalBlinks')], [LIGHT, '', t('fullBlinks')], [ORANGE, DASH, t('partBlinks')]]),
+      lineChart([
+        { pts: part, color: ORANGE, dash: DASH, describe: (p) => t('partBlinks') + ': ' + perMin(p) },
+        { pts: full, color: LIGHT, describe: (p) => t('fullBlinks') + ': ' + perMin(p) },
+        { pts: bl, color: BLUE, describe: (p) => t('totalBlinks') + ': ' + perMin(p) + incompleteText(incompleteShare(p.d.blinks || 0, p.d.fullBlinks)) },
+      ], start.getTime(), end.getTime(), niceMax(maxRate * 1.1), ticks),
     );
   }
 
