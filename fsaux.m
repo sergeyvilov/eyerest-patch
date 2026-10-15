@@ -160,6 +160,9 @@ static void fsaux_observeScreenChanges(void) {
     [[NSNotificationCenter defaultCenter] addObserverForName:NSApplicationDidChangeScreenParametersNotification
         object:nil queue:nil usingBlock:^(NSNotification *n) {
             if (overlayWindow) fsaux_centerOverlay(overlayWindow);
+            // Opening the lid or (un)plugging a display can change the
+            // usable cameras without a camera notification.
+            fsaux_runJS(@"window.__fsaux && window.__fsaux.cameraChanged && window.__fsaux.cameraChanged()");
         }];
 }
 
@@ -595,6 +598,7 @@ static void fsaux_observeScreenState(void) {
     }];
     [wc addObserverForName:NSWorkspaceScreensDidWakeNotification object:nil queue:nil usingBlock:^(NSNotification *n) {
         screenAsleep = NO; fsaux_sendScreenState();
+        fsaux_runJS(@"window.__fsaux && window.__fsaux.cameraChanged && window.__fsaux.cameraChanged()");
     }];
     NSDistributedNotificationCenter *dc = [NSDistributedNotificationCenter defaultCenter];
     [dc addObserverForName:@"com.apple.screenIsLocked" object:nil queue:nil usingBlock:^(NSNotification *n) {

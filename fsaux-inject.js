@@ -134,7 +134,16 @@
     stuckMs = Math.min(2 * stuckMs, STUCK_MAX_MS);
   }, 3000);
   let cameraLabel = '';  // camera of the running stream, for the statistics
-  const noteCamera = (stream) => { const v = stream && stream.getVideoTracks()[0]; if (v && v.label) cameraLabel = v.label; };
+  let liveStream = null;  // the stream monitoring got last
+  const noteCamera = (stream) => {
+    const v = stream && stream.getVideoTracks()[0];
+    if (!v) return;
+    liveStream = stream;
+    if (v.label) cameraLabel = v.label;
+  };
+  // Monitoring's camera still delivers (its track hasn't ended, e.g. by
+  // unplugging the camera or detaching the display it's built into).
+  const cameraAlive = () => !liveStream || liveStream.getVideoTracks().some((t) => t.readyState === 'live');
   async function getUserMediaInner(c) {
     if (!wantsAuto(c)) { const s = await origGetUserMedia(c); noteCamera(s); return s; }
     await listCams();
@@ -168,10 +177,21 @@
     try { await listCams(); } finally { if (ghost) post({ cmd: 'ghost', on: false }); }
     refreshLabels();
     const b = best();
-    const ended = why === 'camera ended';
-    if (restarting || !running() || !b || (b.deviceId === current && !ended)) return;
-    restartMonitoring(why, b.label);
+    const ended = why === 'camera ended' || !cameraAlive();
+    if (restarting || !running()) return;
+    if (!b) { if (ended && !noCameraLogged) { noCameraLogged = true; log('camera gone, no other camera available; waiting'); } return; }
+    noCameraLogged = false;
+    if (b.deviceId === current && !ended) return;
+    restartMonitoring(ended ? 'camera ended' : why, b.label);
   }
+  // The camera can go away without any event the page gets in time (e.g.
+  // display with the camera detached while the lid is closed, then the lid
+  // opened: the built-in camera never "connects"). So the stream is checked
+  // directly; while it's dead, a camera is looked for every few seconds.
+  let noCameraLogged = false;
+  workerInterval(() => {
+    if (running() && !cameraAlive() && !restarting && !pendingRequests.size) checkCamera('camera ended');
+  }, 5000);
   function restartMonitoring(why, label) {
     restarting = true;
     log(why + ' -> restarting monitoring' + (label ? ' with ' + label : ''));
@@ -211,7 +231,8 @@
 
   let showing = false;
   workerInterval(() => {
-    const want = noFace() && popupEnabled();
+    // No smile while monitoring's camera is gone: it wouldn't mean "no face".
+    const want = noFace() && popupEnabled() && cameraAlive();
     if (want) {
       if (!showing) { log('no face -> showing smile'); window.__fsaux.faceLost(); }
       showing = true;
