@@ -724,6 +724,15 @@
       zh: '眼睑下垂但闭合不足一半的眨眼（开度停留在平时的47 %到55 %之间）。它们会让部分眼表暴露在外，泪液铺展不佳；不完全眨眼过多是看屏幕时眼干的常见原因。越少越好。取消勾选“计入不完全眨眼”后，只有完整眨眼才能关闭笑脸，可以训练完整眨眼。从侧面看眨眼会显得较浅，因此摄像头角度不佳时这一比例会偏高。',
     },
     seeStats: { en: 'Show total statistics', de: 'Gesamtstatistik anzeigen', it: 'Mostra statistiche totali', es: 'Ver estadísticas totales', ru: 'Показать общую статистику', ja: '全体の統計を表示', zh: '显示总统计' },
+    viewGrid: { en: 'Calendar', de: 'Kalender', it: 'Calendario', es: 'Calendario', ru: 'Календарь', ja: 'カレンダー', zh: '日历' },
+    viewChart: { en: 'Chart', de: 'Diagramm', it: 'Grafico', es: 'Gráfico', ru: 'График', ja: 'グラフ', zh: '图表' },
+    copy: { en: 'Copy', de: 'Kopieren', it: 'Copia', es: 'Copiar', ru: 'Копировать', ja: 'コピー', zh: '复制' },
+    copied: { en: 'Copied', de: 'Kopiert', it: 'Copiato', es: 'Copiado', ru: 'Скопировано', ja: 'コピーしました', zh: '已复制' },
+    zoom0: { en: '1Y', de: '1J', it: '1A', es: '1A', ru: '1Г', ja: '1年', zh: '1年' },
+    zoom1: { en: '3M', de: '3M', it: '3M', es: '3M', ru: '3М', ja: '3か月', zh: '3月' },
+    zoom2: { en: '1M', de: '1M', it: '1M', es: '1M', ru: '1М', ja: '1か月', zh: '1月' },
+    zoom3: { en: '1W', de: '1W', it: '1S', es: '1S', ru: '1Н', ja: '1週', zh: '1周' },
+    zoom4: { en: '1D', de: '1T', it: '1G', es: '1D', ru: '1Д', ja: '1日', zh: '1天' },
     exportCsv: { en: 'Export CSV', de: 'Als CSV exportieren', it: 'Esporta CSV', es: 'Exportar CSV', ru: 'Экспорт в CSV', ja: 'CSVで書き出す', zh: '导出 CSV' },
     close: { en: 'Close', de: 'Schließen', it: 'Chiudi', es: 'Cerrar', ru: 'Закрыть', ja: '閉じる', zh: '关闭' },
     back: { en: 'Back', de: 'Zurück', it: 'Indietro', es: 'Atrás', ru: 'Назад', ja: '戻る', zh: '返回' },
@@ -912,7 +921,7 @@
 
   function section(title, sub, body, summary) {
     const s = document.createElement('div');
-    s.style.cssText = 'margin-bottom:22px';
+    s.style.cssText = 'margin-bottom:16px';
     const h = document.createElement('div');
     h.style.cssText = 'font-weight:600;font-size:15px;text-transform:uppercase';
     h.textContent = title;
@@ -930,6 +939,8 @@
     const body = panel.querySelector('.fsaux-stats-body');
     hideTip();
     body.textContent = '';
+    updateToolbar();
+    if (statsView === 'chart') { renderChart(body); return; }
     const now7 = span(7, 0), prev7 = span(14, 7);
     const pct = (v) => (v == null ? '—' : Math.round(v) + ' %');
     const rate = (v) => (v == null ? '—' : Math.round(v) + t('perMin'));
@@ -944,8 +955,6 @@
     );
   }
 
-  // One row per recorded day; numbers with a decimal point, minutes rounded
-  // to 0.1, empty where there's no value (like "no data" in the grids).
   // One row per hour with screen time or monitoring. Before per-hour
   // recording started (stats.hoursSince) only screen time is known per hour;
   // the other columns stay empty there. Minutes rounded to 0.1.
@@ -979,6 +988,193 @@
     log('export: ' + (rows.length - 1) + ' hours');
   }
 
+  // ---------- statistics: calendar (GitHub grid) or line chart ----------
+  // The chart zooms from a year (one point per day) to a day (one point per
+  // hour; hourly from a week down). Drag or ◀ ▶ moves in time, the mouse
+  // wheel zooms. "Copy" puts the shown view on the clipboard as an image
+  // (fsaux.m takes a snapshot of the page).
+  const VIEW_KEY = 'fsaux-stats-view';
+  let statsView = (() => { try { return localStorage.getItem(VIEW_KEY) === 'chart' ? 'chart' : 'grid'; } catch (e) { return 'grid'; } })();
+  const ZOOMS = [365, 91, 30, 7, 1];  // days shown
+  let zoom = 2;                      // index into ZOOMS (1 month)
+  let chartEnd = null;               // end of the shown range (ms); null = now
+  const HOUR = 3600000, DAY = 24 * HOUR;
+
+  function setView(v) {
+    statsView = v;
+    try { localStorage.setItem(VIEW_KEY, v); } catch (e) {}
+    renderStats();
+  }
+  function segButton(label, active, onClick) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'button button--size_sm ' + (active ? 'button--variant_solid' : 'button--variant_outline');
+    b.style.cssText = 'min-width:0;padding-inline:10px;height:30px;font-size:13px';
+    b.textContent = label;
+    b.addEventListener('click', onClick);
+    return b;
+  }
+  function updateToolbar() {
+    const bar = panel.querySelector('.fsaux-stats-toolbar');
+    bar.textContent = '';
+    const left = document.createElement('div'), right = document.createElement('div');
+    left.style.cssText = right.style.cssText = 'display:flex;gap:4px;align-items:center';
+    if (statsView === 'chart') {
+      left.append(segButton('◀', false, () => panChart(-0.5)));
+      ZOOMS.forEach((days, i) => left.append(segButton(t('zoom' + i), i === zoom, () => { zoom = i; renderStats(); })));
+      left.append(segButton('▶', false, () => panChart(0.5)));
+      const range = document.createElement('span');
+      range.className = 'fsaux-chart-range';
+      range.style.cssText = 'margin-left:8px;font-size:12px;color:#57606a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:190px';
+      left.append(range);
+    }
+    right.append(segButton(t('viewGrid'), statsView === 'grid', () => setView('grid')), segButton(t('viewChart'), statsView === 'chart', () => setView('chart')));
+    const copy = segButton(t('copy'), false, copyView);
+    copy.classList.add('fsaux-copy');
+    copy.style.marginLeft = '10px';
+    right.append(copy);
+    bar.append(left, right);
+  }
+  function copyView() {
+    hideTip();
+    const r = panel.querySelector('.fsaux-stats-body').getBoundingClientRect();
+    post({ cmd: 'copyview', x: r.left, y: r.top, w: r.width, h: r.height });
+  }
+  window.__fsaux.copied = (ok) => {
+    const b = panel && panel.querySelector('.fsaux-copy');
+    if (!b) return;
+    b.textContent = ok ? '✓ ' + t('copied') : '✕';
+    workerTimeout(() => { if (b.isConnected) b.textContent = t('copy'); }, 1500);
+  };
+  function panChart(fraction) {
+    const days = ZOOMS[zoom];
+    const end = (chartEnd || Date.now()) + fraction * days * DAY;
+    chartEnd = end >= Date.now() ? null : end;
+    renderStats();
+  }
+
+  // Points of one series: {t (ms, middle of the bucket), v, d (raw entry)}.
+  function chartPoints(start, end, hourly, which) {
+    const pts = [];
+    if (hourly) {
+      for (let s = new Date(start); s < end; s = new Date(s.getTime() + HOUR)) {
+        s.setMinutes(0, 0, 0);
+        const k = hourKey(s), h = stats.hours[k];
+        const known = h && stats.hoursSince && k >= stats.hoursSince;
+        let v = null;
+        if (which === 'cov') v = known && h.screen >= 60 ? Math.min(100, (100 * h.track) / h.screen) : null;
+        else v = known && h.blinkSec >= 120 ? (h.blinks || 0) / (h.blinkSec / 60) : null;
+        pts.push({ t: s.getTime() + HOUR / 2, v, d: h, hour: true });
+      }
+    } else {
+      for (let s = new Date(start); s < end; s.setDate(s.getDate() + 1)) {
+        s.setHours(0, 0, 0, 0);
+        const k = dayKey(s), d = stats.days[k];
+        const v = !d || k < stats.since ? null : which === 'cov' ? coverage(d) : blinkRate(d);
+        pts.push({ t: s.getTime() + DAY / 2, v, d, hour: false });
+      }
+    }
+    return pts;
+  }
+  function niceMax(v) {
+    // Divisible by 4, so the 4 gridlines get whole numbers.
+    for (const m of [8, 12, 16, 20, 24, 32, 40, 60, 80, 100, 120, 160, 200]) if (v <= m) return m;
+    return Math.ceil(v / 100) * 100;
+  }
+  function xTicks(start, end, days) {
+    const ticks = [], fmt = (d, o) => d.toLocaleDateString(locale(), o);
+    if (days <= 1) {
+      for (let d = new Date(start); d <= end; d = new Date(d.getTime() + HOUR)) {
+        d.setMinutes(0, 0, 0);
+        if (d >= start && d.getHours() % 3 === 0) ticks.push([d.getTime(), d.toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })]);
+      }
+    } else {
+      const step = days <= 7 ? 1 : days <= 31 ? 5 : days <= 92 ? 14 : 0;
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const day = new Date(d); day.setHours(0, 0, 0, 0);
+        if (day < start) continue;
+        if (step === 0 ? day.getDate() === 1 : step === 14 ? day.getDay() === 1 && (Math.floor(day.getTime() / DAY / 7) % 2 === 0) : step === 5 ? (day.getDate() - 1) % 5 === 0 && day.getDate() < 30 : true)
+          ticks.push([day.getTime(), step === 0 ? fmt(day, { month: 'short' }) : fmt(day, days <= 7 ? { weekday: 'short', day: 'numeric' } : { day: 'numeric', month: 'short' })]);
+      }
+    }
+    return ticks;
+  }
+  function lineChart(pts, start, end, yMax, color, ticksX, describe) {
+    const ns = 'http://www.w3.org/2000/svg';
+    const W = Math.max(400, panel.querySelector('.fsaux-stats-body').clientWidth), H = 175, L = 40, R = 10, T = 8, B = 22;
+    const x = (ms) => L + ((ms - start) / (end - start)) * (W - L - R), y = (v) => T + (1 - v / yMax) * (H - T - B);
+    const svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('width', W); svg.setAttribute('height', H);
+    svg.style.cssText = 'display:block;cursor:grab;user-select:none';
+    const el = (name, attrs) => { const e = document.createElementNS(ns, name); for (const k in attrs) e.setAttribute(k, attrs[k]); svg.appendChild(e); return e; };
+    for (let i = 0; i <= 4; i++) {
+      const v = (yMax * i) / 4;
+      el('line', { x1: L, x2: W - R, y1: y(v), y2: y(v), stroke: '#eaeef2' });
+      el('text', { x: L - 6, y: y(v) + 3, 'text-anchor': 'end', 'font-size': 10, fill: '#57606a' }).textContent = Math.round(v);
+    }
+    for (const [ms, label] of ticksX) {
+      el('line', { x1: x(ms), x2: x(ms), y1: T, y2: H - B, stroke: '#f3f4f6' });
+      el('text', { x: x(ms), y: H - 6, 'text-anchor': 'middle', 'font-size': 10, fill: '#57606a' }).textContent = label;
+    }
+    // Line with gaps where there's no data.
+    let dpath = '', open = false;
+    for (const p of pts) {
+      if (p.v == null) { open = false; continue; }
+      dpath += (open ? 'L' : 'M') + x(p.t).toFixed(1) + ' ' + y(Math.min(p.v, yMax)).toFixed(1);
+      open = true;
+    }
+    if (dpath) el('path', { d: dpath, fill: 'none', stroke: color, 'stroke-width': 2, 'stroke-linejoin': 'round' });
+    const r = pts.length > 120 ? 1.6 : 3;
+    for (const p of pts) {
+      if (p.v == null) continue;
+      const c = el('circle', { cx: x(p.t), cy: y(Math.min(p.v, yMax)), r, fill: color });
+      const when = p.hour ? new Date(p.t - HOUR / 2).toLocaleString(locale(), { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : fmtDate(new Date(p.t));
+      c.addEventListener('mouseenter', () => { c.setAttribute('r', r + 2); showTip(c, when + ': ' + describe(p)); });
+      c.addEventListener('mouseleave', () => { c.setAttribute('r', r); hideTip(); });
+    }
+    // Drag to move in time, wheel to zoom.
+    svg.addEventListener('mousedown', (e) => {
+      const x0 = e.clientX, end0 = chartEnd || Date.now(), msPerPx = (end - start) / (W - L - R);
+      svg.style.cursor = 'grabbing';
+      const move = (ev) => { const e2 = end0 - (ev.clientX - x0) * msPerPx; chartEnd = e2 >= Date.now() ? null : e2; };
+      const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); renderStats(); };
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
+    });
+    svg.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      if (wheelLock) return;
+      wheelLock = true;
+      workerTimeout(() => { wheelLock = false; }, 250);
+      const next = Math.max(0, Math.min(ZOOMS.length - 1, zoom + (e.deltaY < 0 ? 1 : -1)));
+      if (next !== zoom) { zoom = next; renderStats(); }
+    }, { passive: false });
+    return svg;
+  }
+  let wheelLock = false;
+  function renderChart(body) {
+    const days = ZOOMS[zoom], hourly = days <= 7;
+    const end = new Date(chartEnd || Date.now());
+    const start = new Date(end.getTime() - days * DAY);
+    const ticks = xTicks(start, end, days);
+    const cov = chartPoints(start.getTime(), end.getTime(), hourly, 'cov');
+    const bl = chartPoints(start.getTime(), end.getTime(), hourly, 'blink');
+    const maxRate = Math.max(0, ...bl.filter((p) => p.v != null).map((p) => p.v));
+    const range = panel.querySelector('.fsaux-chart-range');
+    if (range) {
+      const o = days <= 1 ? { day: 'numeric', month: 'short', hour: 'numeric' } : { day: 'numeric', month: 'short', year: 'numeric' };
+      range.textContent = start.toLocaleString(locale(), o) + ' – ' + end.toLocaleString(locale(), o);
+    }
+    const head = (title) => { const h = document.createElement('div'); h.style.cssText = 'font-weight:600;font-size:15px;text-transform:uppercase;margin:6px 0 4px'; h.textContent = title; return h; };
+    body.append(
+      head(t('covTitle')),
+      lineChart(cov, start.getTime(), end.getTime(), 100, '#30a14e', ticks, (p) => Math.round(p.v) + ' %' + (p.d ? ' (' + fmtDur(p.d.track) + ' ' + t('of') + ' ' + fmtDur(p.d.screen) + ')' : '')),
+      head(t('blinkTitle')),
+      lineChart(bl, start.getTime(), end.getTime(), niceMax(maxRate * 1.1), '#2171b5', ticks,
+        (p) => Math.round(p.v) + t('perMin') + incompleteText(incompleteShare(p.d.blinks || 0, p.d.fullBlinks))),
+    );
+  }
+
   function openStats() {
     if (!panel) {
       panel = document.createElement('div');
@@ -996,9 +1192,13 @@
       exp.className = 'button button--variant_solid button--size_md';
       exp.style.cssText = 'position:absolute;bottom:16px';
       exp.addEventListener('click', exportCsv);
+      const bar = document.createElement('div');
+      bar.className = 'fsaux-stats-toolbar';
+      bar.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;min-height:30px';
       const body = document.createElement('div');
       body.className = 'fsaux-stats-body';
-      panel.append(body, exp, back);
+      body.style.cssText = 'padding-bottom:4px';
+      panel.append(bar, body, exp, back);
       document.body.appendChild(panel);
     }
     panel.hidden = false;

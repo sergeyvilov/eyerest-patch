@@ -325,7 +325,8 @@ static void *swizzle(Class c, SEL sel, void *imp) {
 // Contents/Resources/fsaux-inject.js is added as a user script to every
 // WKWebView. JS talks back via window.webkit.messageHandlers.fsaux.postMessage
 // ({cmd: 'log', msg} | {cmd: 'state', running} | {cmd: 'ghost', on} | {cmd: 'menu', item} |
-//  {cmd: 'windows'} | {cmd: 'write', name, data} | {cmd: 'screentime'} | {cmd: 'export', name, data}).
+//  {cmd: 'windows'} | {cmd: 'write', name, data} | {cmd: 'screentime'} | {cmd: 'export', name, data} |
+//  {cmd: 'copyview', x, y, w, h}).
 
 static NSHashTable<WKWebView *> *webViews;  // weak
 static BOOL monitoringRunning;
@@ -411,6 +412,22 @@ static void fsaux_ghost(NSWindow *w, BOOL on) {
         // {cmd: 'autostart'} reports the state, {cmd: 'autostart', on} changes it.
         if (d[@"on"]) fsaux_setAutostart([d[@"on"] boolValue]);
         fsaux_sendAutostart();
+    } else if ([cmd isEqual:@"copyview"]) {
+        // {cmd: 'copyview', x, y, w, h}: copy that part of the page (CSS px)
+        // to the clipboard as an image, exactly as it is shown.
+        WKWebView *wv = m.webView;
+        WKSnapshotConfiguration *cfg = [WKSnapshotConfiguration new];
+        cfg.rect = NSMakeRect([d[@"x"] doubleValue], [d[@"y"] doubleValue], [d[@"w"] doubleValue], [d[@"h"] doubleValue]);
+        [wv takeSnapshotWithConfiguration:cfg completionHandler:^(NSImage *img, NSError *err) {
+            BOOL ok = NO;
+            if (img) {
+                NSPasteboard *pb = [NSPasteboard generalPasteboard];
+                [pb clearContents];
+                ok = [pb writeObjects:@[img]];
+            }
+            fsaux_log(wv.window, [NSString stringWithFormat:@"copy view: %@ %@", ok ? @"ok" : @"failed", err ?: @""]);
+            [wv evaluateJavaScript:[NSString stringWithFormat:@"window.__fsaux && window.__fsaux.copied && window.__fsaux.copied(%@)", ok ? @"true" : @"false"] completionHandler:nil];
+        }];
     } else if ([cmd isEqual:@"export"]) {
         // {cmd: 'export', name, data}: save the statistics as a file the user picks.
         NSString *name = [[d[@"name"] description] lastPathComponent], *data = [d[@"data"] description];

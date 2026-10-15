@@ -29,6 +29,8 @@
 - **Live counters** for total, complete and incomplete blinks, with the share of each.
 - **Your current blink rate** right in the menu bar menu (blinks per minute over the last 10 minutes), updating live while the menu is open.
 - **GitHub-style yearly charts:** how much of your screen time eyeREST was watching over you, and how often you blink, day by day, with 7-day trends.
+- **Zoomable line charts:** from a whole year down to a single day, hour by hour. Drag to move in time, scroll to zoom.
+- **One-click copy** of the current view as an image, ready to paste anywhere.
 - **CSV export** with hourly data, ready for your own analysis.
 
 ### 🌍 Feels native
