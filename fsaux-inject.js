@@ -113,20 +113,25 @@
     if (ghost) post({ cmd: 'ghost', on: true });
     const req = { at: Date.now() };
     pendingRequests.add(req);
-    try { return await getUserMediaInner(c); }
+    try { const s = await getUserMediaInner(c); stuckMs = STUCK_MIN_MS; return s; }
     catch (e) { log('getUserMedia failed: ' + e); throw e; }
     finally { pendingRequests.delete(req); if (ghost) post({ cmd: 'ghost', on: false }); }
   };
-  // Sometimes a camera request never answers (e.g. a USB camera still held by
-  // a process that just quit); monitoring then looks on but gets no images.
-  // After STUCK_MS such a request is given up and monitoring restarted.
-  const STUCK_MS = 12000;
+  // Sometimes a camera request doesn't answer for a while (e.g. a USB camera
+  // still held by a process that just quit, or one behind a display's hub
+  // that is still starting up); monitoring then looks on but gets no images.
+  // Such a request is given up and monitoring restarted, waiting longer each
+  // time (12, 24, 48, 60 s) so restarts don't pile up camera requests; the
+  // wait goes back to 12 s once a request answers.
+  const STUCK_MIN_MS = 12000, STUCK_MAX_MS = 60000;
+  let stuckMs = STUCK_MIN_MS;
   workerInterval(() => {
     if (restarting) return;
-    const stuck = [...pendingRequests].filter((r) => Date.now() - r.at > STUCK_MS);
+    const stuck = [...pendingRequests].filter((r) => Date.now() - r.at > stuckMs);
     if (!stuck.length) return;
     for (const r of stuck) pendingRequests.delete(r);  // given up; if one answers later, nothing waits for it
-    restartMonitoring('camera request stuck');
+    restartMonitoring('camera request stuck (waited ' + stuckMs / 1000 + ' s)');
+    stuckMs = Math.min(2 * stuckMs, STUCK_MAX_MS);
   }, 3000);
   let cameraLabel = '';  // camera of the running stream, for the statistics
   const noteCamera = (stream) => { const v = stream && stream.getVideoTracks()[0]; if (v && v.label) cameraLabel = v.label; };
@@ -380,6 +385,7 @@
   let eyes = eyeChoice();
   let gazeHistory = [], gazeCamera = null, secStart = 0, secPitch = 0, secIris = 0, secN = 0;
   let usualPitch = null, usualIris = null;
+  let frozenTicks = 0;
   let frames = 0, usableFrames = 0, tickPitch = [], tickIris = [], tickEar = [];  // per tick, for the log
 
   const P = (lm, i) => ({ x: lm[i].x * videoW, y: lm[i].y * videoH, z: lm[i].z * videoW });
@@ -593,6 +599,13 @@
         '), iris ' + f2(median(tickIris)) + ' (max ' + f2(Math.max(...tickIris)) + ', usual ' + f2(usualIris) + '), EAR ' + f2(median(tickEar)) +
         ' (min ' + f2(Math.min(...tickEar)) + '), usable ' + Math.round(100 * usableShare) + '%, blinks ' + blinkAll + ' detected (' + blinkFull + ' full, ' + passed + ' passed to app), today ' + (today().blinks || 0) + ' counted');
     }
+    // Frozen picture: monitoring on and a face found, but (almost) no new
+    // frames for two ticks in a row; e.g. after several camera requests
+    // answered at once on a camera switch. A restart fixes it.
+    // (Not while a camera request is still waiting: that has its own watchdog.)
+    if (running() && !noFace() && frames <= 2 && !restarting && !pendingRequests.size) {
+      if (++frozenTicks >= 2) { frozenTicks = 0; restartMonitoring('picture frozen (' + frames + ' frames in 10 s)'); }
+    } else frozenTicks = 0;
     frames = usableFrames = 0; tickPitch = []; tickIris = []; tickEar = []; blinkAll = 0; blinkFull = 0; passed = 0;
     eyes = eyeChoice();
     fullOnly = !countIncomplete();
