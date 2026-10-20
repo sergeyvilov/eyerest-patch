@@ -31,7 +31,7 @@
 - **GitHub-style yearly charts:** how much of your screen time eyeREST was watching over you, and how often you blink, day by day, with 7-day trends.
 - **Zoomable line charts:** from a whole year down to a single day, hour by hour. Drag to move in time, scroll to zoom.
 - **One-click copy** of the current view as an image, ready to paste anywhere.
-- **CSV export** with hourly data, ready for your own analysis.
+- **CSV export** with hourly data and the settings in effect, ready for your own analysis.
 
 ### 🌍 Feels native
 - Everything follows the app's language: English, German, Italian, Spanish, Russian, Japanese and Chinese.

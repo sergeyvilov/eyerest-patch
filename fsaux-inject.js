@@ -637,6 +637,15 @@
     d.track += dt;
     h.track += dt;
     if (cameraLabel) { h.cams = h.cams || {}; h.cams[cameraLabel] = (h.cams[cameraLabel] || 0) + dt; }
+    // Settings in effect, in seconds per value, for the CSV export.
+    let cfg = {};
+    try { cfg = JSON.parse(localStorage.getItem('settings')).config || {}; } catch (e) {}
+    h.cfg = h.cfg || {};
+    for (const [k, v] of [['timer', cfg.timerDuration], ['popup', cfg.popupStatus], ['eyes', eyes], ['incomplete', countIncomplete() ? 'yes' : 'no']]) {
+      if (v == null) continue;
+      const m = h.cfg[k] || (h.cfg[k] = {});
+      m[v] = (m[v] || 0) + dt;
+    }
     if (!noFace()) {
       d.blinkSec = (d.blinkSec || 0) + dt * usableShare;
       h.blinkSec = (h.blinkSec || 0) + dt * usableShare;
@@ -991,15 +1000,17 @@
     const r1 = (v) => (v == null ? '' : String(Math.round(v * 10) / 10));
     // Camera: the one used longest in that hour; several joined by " + ".
     const csvText = (s) => (/[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s);
-    const cameraOf = (h) => csvText(Object.entries(h.cams || {}).sort((a, b) => b[1] - a[1]).map((e) => e[0]).join(' + '));
-    const rows = [['hour', 'camera', 'screen_min', 'monitoring_min', 'monitoring_pct', 'blink_measured_min', 'blinks', 'complete_blinks', 'incomplete_blinks', 'blinks_per_min', 'incomplete_pct'].join(',')];
+    const longestFirst = (m) => csvText(Object.entries(m || {}).sort((a, b) => b[1] - a[1]).map((e) => e[0]).join(' + '));
+    const cameraOf = (h) => longestFirst(h.cams);
+    const cfgOf = (h, k) => longestFirst(h.cfg && h.cfg[k]);
+    const rows = [['hour', 'camera', 'popup_timer_s', 'popup', 'eyes', 'count_incomplete', 'screen_min', 'monitoring_min', 'monitoring_pct', 'blink_measured_min', 'blinks', 'complete_blinks', 'incomplete_blinks', 'blinks_per_min', 'incomplete_pct'].join(',')];
     for (const k of Object.keys(stats.hours).sort()) {
       const h = stats.hours[k];
       if (!h.screen && !h.track) continue;
       const known = stats.hoursSince && k >= stats.hoursSince;
       const blinks = h.blinks || 0, full = known ? h.fullBlinks || 0 : null, sec = h.blinkSec || 0;
       rows.push([
-        k + ':00', cameraOf(h), r1(h.screen / 60),
+        k + ':00', cameraOf(h), cfgOf(h, 'timer'), cfgOf(h, 'popup'), cfgOf(h, 'eyes'), cfgOf(h, 'incomplete'), r1(h.screen / 60),
         known ? r1(h.track / 60) : '', known && h.screen ? r1(Math.min(100, (100 * h.track) / h.screen)) : '',
         known ? r1(sec / 60) : '', known ? blinks : '', known ? full : '', known ? blinks - full : '',
         known && sec ? r1(blinks / (sec / 60)) : '', known ? r1(incompleteShare(blinks, full)) : '',
