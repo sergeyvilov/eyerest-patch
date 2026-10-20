@@ -33,7 +33,7 @@ eyeREST is a **Tauri 2** app: Rust using `tao` windows plus a WebKit UI. The pat
 - **Shows over full-screen apps** (VSCode, browsers, …).
 - **Always centered** on the screen you're working on, also after switching displays.
 - **Stays up while no face is detected** (while monitoring), so you notice you've drifted off-camera. It floats above other apps but below eyeREST's own window while you use it.
-- **"Adjust the camera angle"** appears under it (small grey text) after a full minute of poor detection quality with your face in view.
+- **A note at its bottom** (small grey text) says why it's up when there's a special reason, most important first: "Camera shows no picture" (the stream is open but the video doesn't advance; a restart is underway), "No face detected" (the no-face smile), "Adjust the camera angle" (after a full minute of poor detection quality with your face in view).
 - **4-second timer** between 3s and 5s. Choosing it reloads the app's page (about 2 s), since the app reads its settings only at start; monitoring restarts by itself.
 - **"Count incomplete blinks"** checkbox below the eye selection, checked by default. Checked: every blink dismisses or postpones the smile, and blinks the patch sees but the app's own detector misses are passed on to the app. Unchecked: only complete blinks count, which trains complete blinking.
 
@@ -184,7 +184,7 @@ The app's face model (MediaPipe Face Landmarker, about 13 frames per second) bui
 - **Detection quality,** from geometry only, with no per-person calibration. It uses the open eyelid gap in camera pixels (which covers distance, camera angle and resolution) and the head angle to the camera (sideways from face edges 234/454, up/down from forehead/chin), both as medians over the last minute.
   - **Good:** at least 9 px and under 15°. **Fair:** 6 to 9 px or 15 to 25°. **Poor:** under 6 px or over 25°.
   - The face model places points to within about 1 to 2 px, so in a small gap an incomplete blink barely shows.
-  - The smile window's note reads `localStorage['fsaux-quality']`, written by the main window, through the `storage` event. When the face is lost, the measurement starts over and the note disappears, so being away, sitting down or getting up never triggers it.
+  - The smile window's note reads `localStorage['fsaux-smile-note']` (`{kind: 'nopicture'|'noface'|'angle'|null, at}`), written by the main window, through the `storage` event; notes older than 2 minutes are ignored. When the face is lost, the measurement starts over and the note disappears, so being away, sitting down or getting up never triggers it.
 - The log shows a `face:` line every 10 s while monitoring, with frames, pitch, iris, EAR, and detected/counted blinks.
 
 ## Debugging

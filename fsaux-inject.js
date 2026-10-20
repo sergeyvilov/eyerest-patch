@@ -252,6 +252,20 @@
     return !!(canvas && canvas.closest('[hidden]'));
   }
 
+  // The note at the bottom of the smile (shown by the smile window's own
+  // script, which reads localStorage['fsaux-smile-note']): why the smile is
+  // up, most important first.
+  const SMILE_NOTE_KEY = 'fsaux-smile-note';
+  let lastNote = null, lastNoteAt = 0;
+  function updateSmileNote() {
+    const kind = running() && cameraAlive() && appVideo && stalledChecks > 0 ? 'nopicture'
+      : showing ? 'noface' : anglePoor ? 'angle' : null;
+    // Rewritten every 30 s too, so a stale note (main window gone) expires.
+    if (kind === lastNote && Date.now() - lastNoteAt < 30000) return;
+    lastNote = kind; lastNoteAt = Date.now();
+    try { localStorage.setItem(SMILE_NOTE_KEY, JSON.stringify({ kind, at: lastNoteAt })); } catch (e) {}
+  }
+
   let showing = false;
   workerInterval(() => {
     // No smile while monitoring's camera is gone: it wouldn't mean "no face".
@@ -265,6 +279,7 @@
       log('face back -> hiding smile');
       invoke('hide_blink_popup');
     }
+    updateSmileNote();
   }, SHOW_EVERY_MS);
 
   // ---------- 3. start / stop ----------
@@ -475,7 +490,8 @@
   // incomplete blink in a small gap barely shows) and the head angle to the
   // camera. Medians over the last minute. Shared with the smile window
   // through localStorage.
-  const QUALITY_KEY = 'fsaux-quality';
+  let anglePoor = false;  // a whole minute of poor quality: the smile shows "Adjust the camera angle"
+  try { localStorage.removeItem('fsaux-quality'); } catch (e) {}  // used by earlier versions
   const GAP_GOOD = 9, GAP_FAIR = 6, ANGLE_GOOD = 15, ANGLE_FAIR = 25;
   let qGap = [], qAngle = [], qHistory = [], quality = null;
   function noteQuality(lm, pitch) {
@@ -491,7 +507,7 @@
     qGap = []; qAngle = []; qHistory = [];
     if (quality) log('detection quality: face lost, measuring again');
     quality = null;
-    try { localStorage.setItem(QUALITY_KEY, JSON.stringify({ level: null, poorFor: false, at: Date.now() })); } catch (e) {}
+    anglePoor = false;
     const line = document.getElementById('fsaux-quality');
     if (line) line.remove();
   };
@@ -507,7 +523,7 @@
     // The smile window shows its note only after a minute of poor quality.
     // poorFor: a whole minute of poor quality since the face was last found.
     const poorFor = qHistory.length >= 6 && qHistory.every((q) => q[0] < GAP_FAIR || q[1] > ANGLE_FAIR);
-    try { localStorage.setItem(QUALITY_KEY, JSON.stringify({ ...quality, poorFor })); } catch (e) {}
+    anglePoor = poorFor;
     if (changed) log('detection quality ' + level + ' (eyelid gap ' + quality.gap + ' px, head angle ' + quality.angle + ' deg)');
     addQualityLine();
   }
@@ -1638,23 +1654,35 @@
 })();
 
 // Smile window (/src/windows/blink/index.html): a short note at the bottom
-// while the main window reports poor detection for a minute (localStorage
-// 'fsaux-quality', written by the main window; the 'storage' event fires
-// here when it changes).
+// saying why the smile is up, when there's a special reason: the camera shows
+// no picture, no face is detected, or the camera angle has been poor for a
+// minute. The main window writes localStorage['fsaux-smile-note'] (the
+// 'storage' event fires here when it changes); notes older than 2 minutes
+// (main window gone) are ignored.
 (() => {
   if (!/\/windows\/blink\//.test(location.pathname)) return;
-  const NOTE = {
-    en: 'Adjust the camera angle', de: 'Kamerawinkel anpassen', it: "Regola l'angolo della fotocamera", es: 'Ajusta el ángulo de la cámara',
-    ru: 'Поправьте угол камеры', ja: 'カメラの角度を調整してください', zh: '请调整摄像头角度',
+  const NOTES = {
+    nopicture: {
+      en: 'Camera shows no picture', de: 'Kamera liefert kein Bild', it: 'La fotocamera non mostra immagini', es: 'La cámara no muestra imagen',
+      ru: 'Камера не передаёт изображение', ja: 'カメラの映像がありません', zh: '摄像头没有画面',
+    },
+    noface: {
+      en: 'No face detected', de: 'Kein Gesicht erkannt', it: 'Nessun volto rilevato', es: 'No se detecta ninguna cara',
+      ru: 'Лицо не обнаружено', ja: '顔が検出されません', zh: '未检测到面部',
+    },
+    angle: {
+      en: 'Adjust the camera angle', de: 'Kamerawinkel anpassen', it: "Regola l'angolo della fotocamera", es: 'Ajusta el ángulo de la cámara',
+      ru: 'Поправьте угол камеры', ja: 'カメラの角度を調整してください', zh: '请调整摄像头角度',
+    },
   };
   const STALE_MS = 2 * 60 * 1000;
   function update() {
-    let q = null, lang = 'en';
-    try { q = JSON.parse(localStorage.getItem('fsaux-quality')); } catch (e) {}
+    let n = null, lang = 'en';
+    try { n = JSON.parse(localStorage.getItem('fsaux-smile-note')); } catch (e) {}
     try { lang = JSON.parse(localStorage.getItem('settings')).global.languageCode || 'en'; } catch (e) {}
-    const show = !!(q && q.poorFor && Date.now() - q.at < STALE_MS);
+    const texts = n && n.kind && Date.now() - n.at < STALE_MS && NOTES[n.kind];
     let note = document.getElementById('fsaux-note');
-    if (!show) { if (note) note.remove(); return; }
+    if (!texts) { if (note) note.remove(); return; }
     if (!document.body) return;
     if (!note) {
       note = document.createElement('div');
@@ -1663,9 +1691,9 @@
         'color:rgba(60,60,60,0.75);background:transparent;border:1px solid rgba(0,0,0,0.18);border-radius:6px;padding:2px 6px;pointer-events:none';
       document.body.appendChild(note);
     }
-    note.textContent = NOTE[lang] || NOTE.en;
+    note.textContent = texts[lang] || texts.en;
   }
-  window.addEventListener('storage', (e) => { if (!e.key || e.key === 'fsaux-quality' || e.key === 'settings') update(); });
+  window.addEventListener('storage', (e) => { if (!e.key || e.key === 'fsaux-smile-note' || e.key === 'settings') update(); });
   document.addEventListener('visibilitychange', update);
   document.addEventListener('DOMContentLoaded', update);
 })();

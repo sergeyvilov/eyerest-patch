@@ -22,7 +22,7 @@
 - **Complete vs. incomplete blinks.** Half blinks don't wet your eyes properly and are a common cause of dry eyes at the screen. Choose whether they count, and train yourself to blink fully.
 - **Handles awkward camera angles.** Laptop camera above the screen, external camera off to the side: eyeREST adapts. Choose **Any** eye if one eye is hard to see, and get a gentle hint when the camera angle is really bad.
 - **Knows when you look away.** Writing on paper or reading notes doesn't count against you.
-- **Tells you when you're out of view.** The smile stays up while your face isn't detected, so you notice right away.
+- **Tells you why the smile is up.** A small note at its bottom says when your face isn't detected, when the camera shows no picture, or when the camera angle is poor.
 - **A 4-second timer**, in addition to 3, 5, 10 and 15 seconds.
 
 ### 📊 See your progress
