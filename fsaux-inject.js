@@ -184,6 +184,29 @@
     if (b.deviceId === current && !ended) return;
     restartMonitoring(ended ? 'camera ended' : why, b.label);
   }
+  // The camera stream can also be open but deliver no pictures (e.g. the
+  // built-in camera right after opening the lid). That looks like "no face"
+  // to the app, so it's checked on the video itself: the app's <video>
+  // (caught when the stream is attached) must advance. If it doesn't for
+  // stallLimit checks (5 s each), monitoring restarts; each further restart
+  // waits longer (15, 30, 60 s) until the video advances again.
+  let appVideo = null, lastVideoTime = -1, stalledChecks = 0, stallLimit = 3;
+  const srcObjectDesc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'srcObject');
+  Object.defineProperty(HTMLMediaElement.prototype, 'srcObject', {
+    configurable: true,
+    get() { return srcObjectDesc.get.call(this); },
+    set(v) { if (v && v.getVideoTracks && v.getVideoTracks().length) { appVideo = this; lastVideoTime = -1; stalledChecks = 0; } srcObjectDesc.set.call(this, v); },
+  });
+  workerInterval(() => {
+    if (!running() || !appVideo || restarting || pendingRequests.size || !cameraAlive()) { stalledChecks = 0; return; }
+    const tNow = appVideo.currentTime;
+    if (tNow !== lastVideoTime) { lastVideoTime = tNow; stalledChecks = 0; stallLimit = 3; return; }
+    if (++stalledChecks < stallLimit) return;
+    stalledChecks = 0;
+    restartMonitoring('camera delivers no picture (' + stallLimit * 5 + ' s)');
+    stallLimit = Math.min(2 * stallLimit, 12);
+  }, 5000);
+
   // The camera can go away without any event the page gets in time (e.g.
   // display with the camera detached while the lid is closed, then the lid
   // opened: the built-in camera never "connects"). So the stream is checked
