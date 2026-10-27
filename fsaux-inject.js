@@ -323,7 +323,8 @@
     b.click();
     return true;
   }
-  window.__fsaux = { start, stop, running, cameraChanged: () => window.__fsaux_cameraChanged() };
+  window.__fsaux = { start, stop, running, cameraChanged: () => window.__fsaux_cameraChanged(), openStats: () => { statsRequestedAt = Date.now(); openStats(); } };
+  let statsRequestedAt = 0;  // "Statistics" from the menu: keep them open when the window shows
   // "About eyeREST" in the menu: the app's info page (its footer's robot icon).
   // The app replaces its main page with the info page, which stops
   // monitoring; after its Close, monitoring starts again if it was running.
@@ -688,6 +689,8 @@
     if (!noFace()) {
       d.blinkSec = (d.blinkSec || 0) + dt * usableShare;
       h.blinkSec = (h.blinkSec || 0) + dt * usableShare;
+      d.smileSec = (d.smileSec || 0) + dt * usableShare;
+      h.smileSec = (h.smileSec || 0) + dt * usableShare;
       rateBucket().sec += dt * usableShare;
     }
     saveStats();
@@ -714,10 +717,21 @@
   }
 
   // Every time the smile appears (fsaux.m), except the no-face smile.
+  // Smiles are counted like blinks: while monitoring, with the face found
+  // and not just after looking down (the no-face smile isn't counted).
+  // smileCount / smileSec (usable seconds since smiles are counted) gives
+  // smiles per minute; older entries have neither (the field "smiles" there
+  // is from an earlier version and isn't used).
   window.__fsaux.smileShown = () => {
     if (showing) return;
-    lastSmileAt = Date.now();
+    const now = Date.now();
+    lastSmileAt = now;
     afterSmile = true;
+    if (!running() || noFace() || now - lastDownAt <= DOWN_HOLD) return;
+    const d = today(), h = thisHour();
+    d.smileCount = (d.smileCount || 0) + 1;
+    h.smileCount = (h.smileCount || 0) + 1;
+    saveStats();
   };
   window.__fsaux.screenOn = (on) => { screenOn = on; lastTick = Date.now(); };
   window.__fsaux.screenTime = ({ first, firstHour, days, hours }) => {
@@ -753,6 +767,11 @@
     if (!d || !d.blinkSec || d.blinkSec < MIN_BLINK_SEC) return null;
     return (d.blinks || 0) / (d.blinkSec / 60);
   }
+  function smileRate(d, minSec = MIN_BLINK_SEC) {
+    if (!d || !d.smileSec || d.smileSec < minSec) return null;
+    return (d.smileCount || 0) / (d.smileSec / 60);
+  }
+  const smileText = (v) => (v == null ? '' : ', ' + v.toFixed(1) + ' ' + t('smilesPerMin'));
 
   // Texts in the app's languages (settings.global.languageCode); English
   // for anything else.
@@ -793,6 +812,8 @@
       zh: '眼睑下垂但闭合不足一半的眨眼（开度停留在平时的47 %到55 %之间）。它们会让部分眼表暴露在外，泪液铺展不佳；不完全眨眼过多是看屏幕时眼干的常见原因。越少越好。取消勾选“计入不完全眨眼”后，只有完整眨眼才能关闭笑脸，可以训练完整眨眼。从侧面看眨眼会显得较浅，因此摄像头角度不佳时这一比例会偏高。',
     },
     seeStats: { en: 'Show total statistics', de: 'Gesamtstatistik anzeigen', it: 'Mostra statistiche totali', es: 'Ver estadísticas totales', ru: 'Показать общую статистику', ja: '全体の統計を表示', zh: '显示总统计' },
+    smiles: { en: 'Smiles', de: 'Smileys', it: 'Smile', es: 'Caritas', ru: 'Смайлики', ja: 'スマイル', zh: '笑脸' },
+    smilesPerMin: { en: 'smiles/min', de: 'Smileys/min', it: 'smile/min', es: 'caritas/min', ru: 'смайл./мин', ja: 'スマイル/分', zh: '笑脸/分钟' },
     viewGrid: { en: 'Calendar', de: 'Kalender', it: 'Calendario', es: 'Calendario', ru: 'Календарь', ja: 'カレンダー', zh: '日历' },
     viewChart: { en: 'Chart', de: 'Diagramm', it: 'Grafico', es: 'Gráfico', ru: 'График', ja: 'グラフ', zh: '图表' },
     copy: { en: 'Copy', de: 'Kopieren', it: 'Copia', es: 'Copiar', ru: 'Копировать', ja: 'コピー', zh: '复制' },
@@ -1019,7 +1040,7 @@
         grid(coverage, GREENS, 100, (v, d) => Math.round(v) + ' % (' + fmtDur(d.track) + ' ' + t('of') + ' ' + fmtDur(d.screen) + ')'),
         t('last7') + ': ' + pct(now7.cov) + '  ·  ' + t('prev7') + ': ' + pct(prev7.cov)),
       section(t('blinkTitle'), t('blinkSub'),
-        grid(blinkRate, BLUES, 0, (v, d) => Math.round(v) + t('perMin') + incompleteText(incompleteShare(d.blinks || 0, d.fullBlinks))),
+        grid(blinkRate, BLUES, 0, (v, d) => Math.round(v) + t('perMin') + incompleteText(incompleteShare(d.blinks || 0, d.fullBlinks)) + smileText(smileRate(d))),
         t('last7') + ': ' + rateSplit(now7) + '  ·  ' + t('prev7') + ': ' + rateSplit(prev7)),
     );
   }
@@ -1042,7 +1063,7 @@
     const longestFirst = (m) => csvText(Object.entries(m || {}).sort((a, b) => b[1] - a[1]).map((e) => e[0]).join(' + '));
     const cameraOf = (h) => longestFirst(h.cams);
     const cfgOf = (h, k) => longestFirst(h.cfg && h.cfg[k]);
-    const rows = [['hour', 'camera', 'popup_timer_s', 'popup', 'eyes', 'count_incomplete', 'screen_min', 'monitoring_min', 'monitoring_pct', 'blink_measured_min', 'blinks', 'complete_blinks', 'incomplete_blinks', 'blinks_per_min', 'incomplete_pct'].join(',')];
+    const rows = [['hour', 'camera', 'popup_timer_s', 'popup', 'eyes', 'count_incomplete', 'screen_min', 'monitoring_min', 'monitoring_pct', 'blink_measured_min', 'blinks', 'complete_blinks', 'incomplete_blinks', 'blinks_per_min', 'incomplete_pct', 'smiles', 'smiles_per_min'].join(',')];
     for (const k of Object.keys(stats.hours).sort()) {
       const h = stats.hours[k];
       if (!h.screen && !h.track) continue;
@@ -1053,6 +1074,7 @@
         known ? r1(h.track / 60) : '', known && h.screen ? r1(Math.min(100, (100 * h.track) / h.screen)) : '',
         known ? r1(sec / 60) : '', known ? blinks : '', known ? full : '', known ? blinks - full : '',
         known && sec ? r1(blinks / (sec / 60)) : '', known ? r1(incompleteShare(blinks, full)) : '',
+        known && h.smileSec != null ? h.smileCount || 0 : '', known && h.smileSec ? r1(Math.round(100 * (h.smileCount || 0) / (h.smileSec / 60)) / 100) : '',
       ].join(','));
     }
     post({ cmd: 'export', name: 'eyerest-statistics-' + dayKey(new Date()) + '.csv', data: rows.join('\n') + '\n' });
@@ -1134,6 +1156,7 @@
         const known = h && stats.hoursSince && k >= stats.hoursSince;
         let v = null;
         if (which === 'cov') v = known && h.screen >= 60 ? Math.min(100, (100 * h.track) / h.screen) : null;
+        else if (which === 'smile') v = known ? smileRate(h, 120) : null;
         else v = known && h.blinkSec >= 120 ? blinkKind(h, which) / (h.blinkSec / 60) : null;
         pts.push({ t: s.getTime() + HOUR / 2, v, d: h, hour: true });
       }
@@ -1141,7 +1164,7 @@
       for (let s = new Date(start); s < end; s.setDate(s.getDate() + 1)) {
         s.setHours(0, 0, 0, 0);
         const k = dayKey(s), d = stats.days[k];
-        const v = !d || k < stats.since ? null : which === 'cov' ? coverage(d)
+        const v = !d || k < stats.since ? null : which === 'cov' ? coverage(d) : which === 'smile' ? smileRate(d)
           : blinkRate(d) == null ? null : blinkKind(d, which) == null ? null : blinkKind(d, which) / (d.blinkSec / 60);
         pts.push({ t: s.getTime() + DAY / 2, v, d, hour: false });
       }
@@ -1244,6 +1267,7 @@
     const bl = chartPoints(start.getTime(), end.getTime(), hourly, 'blink');
     const full = chartPoints(start.getTime(), end.getTime(), hourly, 'full');
     const part = chartPoints(start.getTime(), end.getTime(), hourly, 'part');
+    const smiles = chartPoints(start.getTime(), end.getTime(), hourly, 'smile');
     const maxRate = Math.max(0, ...bl.filter((p) => p.v != null).map((p) => p.v));
     const range = panel.querySelector('.fsaux-chart-range');
     if (range) {
@@ -1267,13 +1291,14 @@
       return h;
     };
     const perMin = (p) => Math.round(p.v) + t('perMin');
-    const BLUE = '#08306b', LIGHT = '#4f9bd9', ORANGE = '#f0782b', DASH = '5 4';
+    const BLUE = '#08306b', LIGHT = '#4f9bd9', ORANGE = '#f0782b', PURPLE = '#8250df', DASH = '5 4', DOTS = '1 4';
     body.append(
       head(t('covTitle')),
       lineChart([{ pts: cov, color: '#30a14e', describe: (p) => Math.round(p.v) + ' %' + (p.d ? ' (' + fmtDur(p.d.track) + ' ' + t('of') + ' ' + fmtDur(p.d.screen) + ')' : '') }],
         start.getTime(), end.getTime(), 100, ticks),
-      head(t('blinkTitle'), [[BLUE, '', t('totalBlinks')], [LIGHT, '', t('fullBlinks')], [ORANGE, DASH, t('partBlinks')]]),
+      head(t('blinkTitle'), [[BLUE, '', t('totalBlinks')], [LIGHT, '', t('fullBlinks')], [ORANGE, DASH, t('partBlinks')], [PURPLE, DOTS, t('smiles')]]),
       lineChart([
+        { pts: smiles, color: PURPLE, dash: DOTS, describe: (p) => t('smiles') + ': ' + p.v.toFixed(1) + t('perMin') },
         { pts: part, color: ORANGE, dash: DASH, describe: (p) => t('partBlinks') + ': ' + perMin(p) },
         { pts: full, color: LIGHT, describe: (p) => t('fullBlinks') + ': ' + perMin(p) },
         { pts: bl, color: BLUE, describe: (p) => t('totalBlinks') + ': ' + perMin(p) + incompleteText(incompleteShare(p.d.blinks || 0, p.d.fullBlinks)) },
@@ -1318,6 +1343,7 @@
 
   // Reopening the window shows the main view, not the statistics.
   document.addEventListener('visibilitychange', () => {
+    if (Date.now() - statsRequestedAt < 3000) return;
     if (!document.hidden && panel && !panel.hidden) { panel.hidden = true; hideTip(); }
   });
 
