@@ -14,9 +14,9 @@
 // 7. Usage statistics: screen-on time per day from the power-management log,
 //    screen sleep/wake and every appearance of the smile are reported to the
 //    JS, which keeps the daily statistics and draws them.
-// 8. Run at startup: a login item (launch agent in the bundle, registered with
-//    SMAppService) starts the app with --fsaux-autostart (only logged). A
-//    second copy of the app quits.
+// 8. Run at startup: the app is registered as a login item (SMAppService
+//    mainAppService). A helper restarts it when macOS quits it (storage
+//    cleanup on a full disk). A second copy of the app quits.
 // 9. The main window stays hidden at launch (monitoring starts by itself); it
 //    opens via the menu's Open, by opening the app again while it runs, or
 //    when the JS asks (camera permission / first-run intro still pending).
@@ -197,8 +197,11 @@ static BOOL hookSetPolicy(NSApplication *self, SEL _cmd, NSApplicationActivation
 
 // --- 3. minimize = hide, close = quit ---
 
+static void fsaux_markDeliberateQuit(void);
+
 static void fsaux_quit(NSWindow *w, NSString *why) {
     quitting = YES;
+    fsaux_markDeliberateQuit();  // the restart helper stays quiet
     fsaux_log(w, why);
     origOrderOut(w, @selector(orderOut:), nil);
     // We are inside tao's event handler (it holds a lock that terminate: needs),
@@ -609,29 +612,45 @@ static void fsaux_observeScreenState(void) {
     }];
 }
 
-// --- 8. run at startup ---
-// Contents/Library/LaunchAgents/<kAgentPlist> (added by patch.sh) runs the
-// app's binary with --fsaux-autostart at login. The app's own autostart
-// (osascript / ~/Library/LaunchAgents) can't work inside the sandbox.
+// --- 8. run at startup, and restart after being quit by macOS ---
+// "Run at startup" registers the app itself as a login item
+// (SMAppService.mainAppService; macOS opens it at login like a double-click).
+// A launchd agent inside the bundle can't be used: launchd refuses to start
+// ad-hoc-signed programs that way ("Launch Constraint Violation", no Team ID).
+// Earlier versions registered such an agent; it is removed once.
 
-static NSString *const kAgentPlist = @"com.vinlemon.eyeREST.fsaux-autostart.plist";
+static SMAppService *fsaux_loginItem(void) API_AVAILABLE(macos(13.0)) {
+    return [SMAppService mainAppService];
+}
 
-static SMAppService *fsaux_agent(void) API_AVAILABLE(macos(13.0)) {
-    return [SMAppService agentServiceWithPlistName:kAgentPlist];
+static BOOL fsaux_installedCopy(void) {
+    return [[NSBundle mainBundle].bundlePath hasPrefix:@"/Applications/"];
 }
 
 static void fsaux_setAutostart(BOOL on) {
     if (@available(macOS 13.0, *)) {
         NSError *err;
-        BOOL ok = on ? [fsaux_agent() registerAndReturnError:&err] : [fsaux_agent() unregisterAndReturnError:&err];
+        BOOL ok = on ? [fsaux_loginItem() registerAndReturnError:&err] : [fsaux_loginItem() unregisterAndReturnError:&err];
         fsaux_log(nil, [NSString stringWithFormat:@"autostart %@: %@ %@", on ? @"on" : @"off", ok ? @"ok" : @"failed", err ?: @""]);
+    }
+}
+
+static void fsaux_migrateOldLoginAgent(void) {
+    if (@available(macOS 13.0, *)) {
+        NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
+        if (![ud objectForKey:@"fsaux-autostart-build"] || !fsaux_installedCopy()) return;
+        NSError *err;
+        [[SMAppService agentServiceWithPlistName:@"com.vinlemon.eyeREST.fsaux-autostart.plist"] unregisterAndReturnError:&err];
+        [ud removeObjectForKey:@"fsaux-autostart-build"];
+        fsaux_log(nil, [NSString stringWithFormat:@"autostart: old login agent removed %@", err ?: @""]);
+        fsaux_setAutostart(YES);  // it was on
     }
 }
 
 static void fsaux_sendAutostart(void) {
     NSString *state = @"unsupported";
     if (@available(macOS 13.0, *)) {
-        switch (fsaux_agent().status) {
+        switch (fsaux_loginItem().status) {
             case SMAppServiceStatusEnabled: state = @"on"; break;
             case SMAppServiceStatusRequiresApproval: state = @"approval"; break;
             default: state = @"off";
@@ -640,8 +659,47 @@ static void fsaux_sendAutostart(void) {
     fsaux_runJS([NSString stringWithFormat:@"window.__fsaux && window.__fsaux.autostartState('%@')", state]);
 }
 
-// Registering the agent also runs it right away, and the app may be opened
-// while it already runs: a second copy quits before it shows anything.
+// macOS's storage cleanup (cache_delete, "CacheDeleteAppContainerCaches")
+// kills sandboxed apps when the disk is nearly full. A small helper (a shell
+// started by the app; it survives the app being killed) waits for the app to
+// end and opens it again, unless the end was deliberate: Exit, logout and
+// shutdown go through -terminate: and leave a marker first. At most 5
+// restarts in 10 minutes. Only the copy in /Applications does this.
+static NSString *fsaux_supportDir(void) {
+    NSString *d = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/fsaux"];
+    [[NSFileManager defaultManager] createDirectoryAtPath:d withIntermediateDirectories:YES attributes:nil error:nil];
+    return d;
+}
+
+static void fsaux_markDeliberateQuit(void) {
+    [@"quit" writeToFile:[fsaux_supportDir() stringByAppendingPathComponent:@"quit"] atomically:NO encoding:NSUTF8StringEncoding error:nil];
+}
+
+static void fsaux_startRestartHelper(void) {
+    if (!fsaux_installedCopy()) return;
+    NSString *dir = fsaux_supportDir();
+    NSString *mark = [dir stringByAppendingPathComponent:@"quit"], *times = [dir stringByAppendingPathComponent:@"restarts"];
+    [[NSFileManager defaultManager] removeItemAtPath:mark error:nil];
+    NSString *script = [NSString stringWithFormat:
+        @"while kill -0 %d 2>/dev/null; do sleep 2; done\n"
+         "[ -e '%@' ] && exit 0\n"
+         "now=$(date +%%s); recent=0\n"
+         "[ -f '%@' ] && recent=$(awk -v n=$now '$1 > n - 600' '%@' | wc -l)\n"
+         "[ \"$recent\" -ge 5 ] && exit 0\n"
+         "echo $now >> '%@'\n"
+         "for i in 1 2 3 4 5 6; do sleep 10; /usr/bin/open -b com.vinlemon.eyeREST && exit 0; done\n",
+        getpid(), mark, times, times, times];
+    NSTask *t = [NSTask new];
+    t.executableURL = [NSURL fileURLWithPath:@"/bin/sh"];
+    t.arguments = @[@"-c", script];
+    t.standardOutput = t.standardError = [NSFileHandle fileHandleWithNullDevice];
+    NSError *err;
+    if (![t launchAndReturnError:&err]) fsaux_log(nil, [NSString stringWithFormat:@"restart helper failed: %@", err]);
+    [[NSNotificationCenter defaultCenter] addObserverForName:NSApplicationWillTerminateNotification object:nil queue:nil
+        usingBlock:^(NSNotification *n) { fsaux_markDeliberateQuit(); }];
+}
+
+// Only one copy runs: a second one quits before it shows anything.
 static void fsaux_quitIfDuplicate(void) {
     NSString *bid = [NSBundle mainBundle].bundleIdentifier;
     for (NSRunningApplication *a in [NSRunningApplication runningApplicationsWithBundleIdentifier:bid]) {
@@ -812,7 +870,10 @@ static void fsaux_hookTrayWhenReady(void) {
 
 __attribute__((constructor)) static void fsaux_init(void) {
     fsaux_quitIfDuplicate();
-    if ([[NSProcessInfo processInfo].arguments containsObject:@"--fsaux-autostart"]) fsaux_log(nil, @"started by login item");
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        fsaux_migrateOldLoginAgent();
+        fsaux_startRestartHelper();
+    });
     fsaux_observeMainWindowFocus();
     fsaux_observeScreenChanges();
     fsaux_observeScreenState();

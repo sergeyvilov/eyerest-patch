@@ -14,6 +14,7 @@
 
 ### 👀 Set it and forget it
 - **Starts with your Mac** and begins monitoring right away, out of sight in the menu bar. No Dock icon, no window in your way.
+- **Comes back by itself** if macOS quits it, which it does to free space when the disk is nearly full. Only your own Exit really ends it.
 - **Always the right camera.** Plug in an external camera or a monitor with a built-in one, and eyeREST switches over. Unplug it, and it goes back to the laptop camera. Even with the window closed.
 - **Works everywhere.** The smile also appears over full-screen apps such as your editor or browser, centered on the screen you're using.
 

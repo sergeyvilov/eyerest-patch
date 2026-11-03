@@ -30,6 +30,7 @@ codesign --remove-signature "$BIN"
 python3 insert_dylib.py "$BIN" @executable_path/libfsaux.dylib
 cp libfsaux.dylib "$OUT/Contents/MacOS/"
 cp fsaux-inject.js "$OUT/Contents/Resources/"
+# Only so an old registration of this login agent can be removed (see fsaux.m).
 mkdir -p "$OUT/Contents/Library/LaunchAgents"
 cp com.vinlemon.eyeREST.fsaux-autostart.plist "$OUT/Contents/Library/LaunchAgents/"
 plutil -replace LSUIElement -bool YES "$OUT/Contents/Info.plist"

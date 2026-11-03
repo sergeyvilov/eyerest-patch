@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Login item for "Run at startup" (registered by libfsaux.dylib via SMAppService). -->
+<!-- Login agent of earlier versions, no longer registered (launchd refuses to start
+     ad-hoc-signed programs this way). Kept in the bundle only so that libfsaux.dylib
+     can unregister an existing registration of it. -->
 <plist version="1.0"><dict>
 <key>Label</key><string>com.vinlemon.eyeREST.fsaux-autostart</string>
 <key>BundleProgram</key><string>Contents/MacOS/eyerest</string>
