@@ -15,8 +15,7 @@
 //    screen sleep/wake and every appearance of the smile are reported to the
 //    JS, which keeps the daily statistics and draws them.
 // 8. Run at startup: the app is registered as a login item (SMAppService
-//    mainAppService). A helper restarts it when macOS quits it (storage
-//    cleanup on a full disk). A second copy of the app quits.
+//    mainAppService). A second copy of the app quits.
 // 10. Runs without the App Sandbox; the web data is moved out of the sandbox
 //     container once (section 9).
 // 9. The main window stays hidden at launch (monitoring starts by itself); it
@@ -199,11 +198,8 @@ static BOOL hookSetPolicy(NSApplication *self, SEL _cmd, NSApplicationActivation
 
 // --- 3. minimize = hide, close = quit ---
 
-static void fsaux_markDeliberateQuit(void);
-
 static void fsaux_quit(NSWindow *w, NSString *why) {
     quitting = YES;
-    fsaux_markDeliberateQuit();  // the restart helper stays quiet
     fsaux_log(w, why);
     origOrderOut(w, @selector(orderOut:), nil);
     // We are inside tao's event handler (it holds a lock that terminate: needs),
@@ -614,7 +610,7 @@ static void fsaux_observeScreenState(void) {
     }];
 }
 
-// --- 8. run at startup, and restart after being quit by macOS ---
+// --- 8. run at startup ---
 // "Run at startup" registers the app itself as a login item
 // (SMAppService.mainAppService; macOS opens it at login like a double-click).
 // A launchd agent inside the bundle can't be used: launchd refuses to start
@@ -659,46 +655,6 @@ static void fsaux_sendAutostart(void) {
         }
     }
     fsaux_runJS([NSString stringWithFormat:@"window.__fsaux && window.__fsaux.autostartState('%@')", state]);
-}
-
-// macOS's storage cleanup (cache_delete, "CacheDeleteAppContainerCaches")
-// kills sandboxed apps when the disk is nearly full. A small helper (a shell
-// started by the app; it survives the app being killed) waits for the app to
-// end and opens it again, unless the end was deliberate: Exit, logout and
-// shutdown go through -terminate: and leave a marker first. At most 5
-// restarts in 10 minutes. Only the copy in /Applications does this.
-static NSString *fsaux_supportDir(void) {
-    NSString *d = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/com.vinlemon.eyeREST/fsaux"];
-    [[NSFileManager defaultManager] createDirectoryAtPath:d withIntermediateDirectories:YES attributes:nil error:nil];
-    return d;
-}
-
-static void fsaux_markDeliberateQuit(void) {
-    [@"quit" writeToFile:[fsaux_supportDir() stringByAppendingPathComponent:@"quit"] atomically:NO encoding:NSUTF8StringEncoding error:nil];
-}
-
-static void fsaux_startRestartHelper(void) {
-    if (!fsaux_installedCopy()) return;
-    NSString *dir = fsaux_supportDir();
-    NSString *mark = [dir stringByAppendingPathComponent:@"quit"], *times = [dir stringByAppendingPathComponent:@"restarts"];
-    [[NSFileManager defaultManager] removeItemAtPath:mark error:nil];
-    NSString *script = [NSString stringWithFormat:
-        @"while kill -0 %d 2>/dev/null; do sleep 2; done\n"
-         "[ -e '%@' ] && exit 0\n"
-         "now=$(date +%%s); recent=0\n"
-         "[ -f '%@' ] && recent=$(awk -v n=$now '$1 > n - 600' '%@' | wc -l)\n"
-         "[ \"$recent\" -ge 5 ] && exit 0\n"
-         "echo $now >> '%@'\n"
-         "for i in 1 2 3 4 5 6; do sleep 10; /usr/bin/open -b com.vinlemon.eyeREST && exit 0; done\n",
-        getpid(), mark, times, times, times];
-    NSTask *t = [NSTask new];
-    t.executableURL = [NSURL fileURLWithPath:@"/bin/sh"];
-    t.arguments = @[@"-c", script];
-    t.standardOutput = t.standardError = [NSFileHandle fileHandleWithNullDevice];
-    NSError *err;
-    if (![t launchAndReturnError:&err]) fsaux_log(nil, [NSString stringWithFormat:@"restart helper failed: %@", err]);
-    [[NSNotificationCenter defaultCenter] addObserverForName:NSApplicationWillTerminateNotification object:nil queue:nil
-        usingBlock:^(NSNotification *n) { fsaux_markDeliberateQuit(); }];
 }
 
 // Only one copy runs: a second one quits before it shows anything.
@@ -906,7 +862,6 @@ __attribute__((constructor)) static void fsaux_init(void) {
     fsaux_migrateFromContainer();
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         fsaux_migrateOldLoginAgent();
-        fsaux_startRestartHelper();
     });
     fsaux_observeMainWindowFocus();
     fsaux_observeScreenChanges();
