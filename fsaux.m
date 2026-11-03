@@ -17,6 +17,8 @@
 // 8. Run at startup: the app is registered as a login item (SMAppService
 //    mainAppService). A helper restarts it when macOS quits it (storage
 //    cleanup on a full disk). A second copy of the app quits.
+// 10. Runs without the App Sandbox; the web data is moved out of the sandbox
+//     container once (section 9).
 // 9. The main window stays hidden at launch (monitoring starts by itself); it
 //    opens via the menu's Open, by opening the app again while it runs, or
 //    when the JS asks (camera permission / first-run intro still pending).
@@ -49,10 +51,10 @@ static void (*origPerformMiniaturize)(id, SEL, id);
 static void (*origDeminiaturize)(id, SEL, id);
 static BOOL (*origIsMiniaturized)(id, SEL);
 
-// Log file: ~/Library/Containers/com.vinlemon.eyeREST/Data/tmp/fsaux.log
+// Log file: ~/Library/Logs/eyeREST-patch.log
 static const unsigned long long kLogMaxBytes = 2 * 1024 * 1024;
 static void fsaux_log(NSWindow *w, NSString *what) {
-    NSString *p = [NSTemporaryDirectory() stringByAppendingPathComponent:@"fsaux.log"];
+    NSString *p = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Logs/eyeREST-patch.log"];
     NSString *line = [NSString stringWithFormat:@"%@ %@ %@ title=%@ level=%ld cb=0x%lx style=0x%lx frame=%@\n",
         [NSDate date], what, NSStringFromClass([w class]), w.title, (long)w.level,
         (unsigned long)w.collectionBehavior, (unsigned long)w.styleMask, NSStringFromRect(w.frame)];
@@ -666,7 +668,7 @@ static void fsaux_sendAutostart(void) {
 // shutdown go through -terminate: and leave a marker first. At most 5
 // restarts in 10 minutes. Only the copy in /Applications does this.
 static NSString *fsaux_supportDir(void) {
-    NSString *d = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/fsaux"];
+    NSString *d = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/com.vinlemon.eyeREST/fsaux"];
     [[NSFileManager defaultManager] createDirectoryAtPath:d withIntermediateDirectories:YES attributes:nil error:nil];
     return d;
 }
@@ -868,8 +870,40 @@ static void fsaux_hookTrayWhenReady(void) {
     fsaux_log(nil, @"tray menu installed");
 }
 
+// --- 9. leaving the sandbox ---
+// The patched app runs without the App Sandbox (macOS's storage cleanup kills
+// sandboxed apps on a nearly full disk). Its web data (settings, statistics)
+// then lives in ~/Library/WebKit/com.vinlemon.eyeREST instead of the
+// sandbox container; it is copied over once, before WebKit starts. Data that
+// was already there is kept aside (WebsiteData.before-migration-<time>), the
+// container itself is left as it was.
+static void fsaux_migrateFromContainer(void) {
+    if (getenv("APP_SANDBOX_CONTAINER_ID")) return;  // still sandboxed
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *home = NSHomeDirectory();
+    NSString *mark = [home stringByAppendingPathComponent:@"Library/Application Support/com.vinlemon.eyeREST/fsaux/migrated"];
+    if ([fm fileExistsAtPath:mark]) return;
+    NSString *src = [home stringByAppendingPathComponent:@"Library/Containers/com.vinlemon.eyeREST/Data/Library/WebKit/WebsiteData"];
+    NSString *dstDir = [home stringByAppendingPathComponent:@"Library/WebKit/com.vinlemon.eyeREST"];
+    NSString *dst = [dstDir stringByAppendingPathComponent:@"WebsiteData"];
+    NSError *err;
+    [fm createDirectoryAtPath:[mark stringByDeletingLastPathComponent] withIntermediateDirectories:YES attributes:nil error:nil];
+    if ([fm fileExistsAtPath:src]) {
+        [fm createDirectoryAtPath:dstDir withIntermediateDirectories:YES attributes:nil error:nil];
+        if ([fm fileExistsAtPath:dst]) {
+            NSString *aside = [dst stringByAppendingFormat:@".before-migration-%ld", (long)[NSDate date].timeIntervalSince1970];
+            [fm moveItemAtPath:dst toPath:aside error:nil];
+        }
+        BOOL ok = [fm copyItemAtPath:src toPath:dst error:&err];
+        fsaux_log(nil, [NSString stringWithFormat:@"migration from sandbox container: %@ %@", ok ? @"ok" : @"failed", err ?: @""]);
+        if (!ok) return;  // try again next launch
+    }
+    [@"done" writeToFile:mark atomically:YES encoding:NSUTF8StringEncoding error:nil];
+}
+
 __attribute__((constructor)) static void fsaux_init(void) {
     fsaux_quitIfDuplicate();
+    fsaux_migrateFromContainer();
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         fsaux_migrateOldLoginAgent();
         fsaux_startRestartHelper();

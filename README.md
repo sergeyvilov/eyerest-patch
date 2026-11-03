@@ -58,7 +58,7 @@ After installing, macOS will probably ask for **camera access** again, because t
 
 ## Good to know
 
-- **Your settings stay.** The patched app keeps using eyeREST's own data, so your settings carry over.
+- **Your settings stay.** The patched app takes eyeREST's data with it: on its first launch, macOS asks once whether eyeREST may access data from other apps (its own old sandbox data). Allow it.
 - **Your data stays on your Mac.** The patch stores its statistics locally, inside eyeREST's own data, and sends nothing anywhere.
 - **Statistics start when you install the patch.** Earlier days show as "no data".
 - **Blink counting is an estimate.** It's tuned on real counted blinks but not clinically validated, and very shallow eyelid movements aren't counted.

@@ -65,7 +65,7 @@ Below each grid are the averages for the last 7 days and the 7 days before. They
 | `fsaux.m` | Source of the injected library (`libfsaux.dylib`): window, Dock and button changes, plus injecting the JS below |
 | `fsaux-inject.js` | JavaScript injected into the app's WebViews: Auto camera, no-face smile, start/stop, blink detection, counters, statistics and the added controls (main window), and the camera-angle note (smile window). Copied to `Contents/Resources/`, so you can edit it and re-run `patch.sh` without touching the C code |
 | `insert_dylib.py` | Adds an `LC_LOAD_DYLIB` load command for the library to every slice of the `eyerest` binary |
-| `ents.plist` | Entitlements for the ad-hoc re-signature: sandbox, camera, network client, read-only access to `/private/var/log/powermanagement/` (for screen time), and read/write access to files the user picks in a save dialog (CSV export) |
+| `ents.plist` | Entitlements for the ad-hoc re-signature: only the camera. The app runs **without the App Sandbox** (see *Leaving the sandbox*) |
 | `patch.sh` | Full pipeline: back up, compile, inject, edit Info.plist, re-sign |
 | `com.vinlemon.eyeREST.fsaux-autostart.plist` | Login agent of earlier versions, copied to `Contents/Library/LaunchAgents/` only so that an existing registration of it can be removed. launchd refuses to start ad-hoc-signed programs as an agent ("Launch Constraint Violation", no Team ID), so "Run at startup" now registers the app itself |
 | `screenshots/` | Screenshots shown in the README |
@@ -142,7 +142,7 @@ What the script does in the main page (in the smile window it only shows the cam
 - **Camera requests while the window is hidden:** WebKit only grants `getUserMedia` while the page's window is on screen; otherwise the request just waits, with no error. So Start from the menu with the window minimized used to leave the camera off. Turning off WebKit's private `getUserMediaRequiresFocus` preference didn't help. Instead, the JS sends `{cmd: 'ghost', on: true/false}` around every camera request made while `document.hidden`. Meanwhile `fsaux.m` puts the main window on screen with alpha 0, click-through, using `orderFrontRegardless` (no app activation), then hides it again. It clears the "hidden by minimize" marker during that time; otherwise AppKit would treat ordering it front as un-minimizing, and the `deminiaturize:` hook would activate the app. A 10 s safety net hides the window again if a request never finishes. Camera switching on plug/unplug uses the same mechanism.
 - **Timers run in a Web Worker.** WebKit pauses page timers while the window is hidden, but Worker timers keep running. The app's own face detector uses the same trick.
 
-The `fsaux` message handler accepts `{cmd: 'log', msg}` (written to the log as `JS …`), `{cmd: 'state', running, lang, rate}`, `{cmd: 'ghost', on}`, `{cmd: 'screentime'}`, `{cmd: 'autostart', on}`, `{cmd: 'export', name, data}`, `{cmd: 'menu', item: 'open'|'start'|'stop'|'about'|'exit'}` (runs a menu action without clicking, handy for scripted tests), `{cmd: 'windows'}` (logs every window and its view tree with frames), and `{cmd: 'write', name, data}` (writes a file to `…/Data/tmp/fsaux-dump/`). To re-dump the frontend after an update, temporarily put this in `fsaux-inject.js`:
+The `fsaux` message handler accepts `{cmd: 'log', msg}` (written to the log as `JS …`), `{cmd: 'state', running, lang, rate}`, `{cmd: 'ghost', on}`, `{cmd: 'screentime'}`, `{cmd: 'autostart', on}`, `{cmd: 'export', name, data}`, `{cmd: 'menu', item: 'open'|'start'|'stop'|'about'|'exit'}` (runs a menu action without clicking, handy for scripted tests), `{cmd: 'windows'}` (logs every window and its view tree with frames), and `{cmd: 'write', name, data}` (writes a file to `$TMPDIR/fsaux-dump/`). To re-dump the frontend after an update, temporarily put this in `fsaux-inject.js`:
 
 ```js
 window.addEventListener('load', async () => {
@@ -167,7 +167,7 @@ window.addEventListener('load', async () => {
 
 - The original binary has **no hardened runtime** (`flags=0x0`), so library validation doesn't apply and an ad-hoc-signed injected library loads fine.
 - The original entitlements include `com.apple.application-identifier`, `com.apple.developer.team-identifier` and `keychain-access-groups`. These are restricted: an ad-hoc-signed app that claims them is killed at launch. `ents.plist` keeps only `app-sandbox`, `device.camera` and `network.client`, and adds two that ad-hoc apps may use: read-only access to the power log (temporary exception) and access to files picked in a save panel.
-- The app stays **sandboxed** with the same bundle ID, so it keeps using its existing container at `~/Library/Containers/com.vinlemon.eyeREST/` and your settings carry over.
+- The app runs **without the App Sandbox**: macOS's storage cleanup (`cache_delete`, "CacheDeleteAppContainerCaches") kills sandboxed apps when the disk is nearly full. Without the sandbox the exceptions for the power log and the CSV save panel aren't needed either.
 - `/Applications/eyeREST.app` is owned by root (installed by the App Store), so the patched app is built in this folder and copied over with `sudo`.
 
 ## Blink and gaze detection
@@ -188,15 +188,19 @@ The app's face model (MediaPipe Face Landmarker, about 13 frames per second) bui
   - The smile window's note reads `localStorage['fsaux-smile-note']` (`{kind: 'nopicture'|'noface'|'angle'|null, at}`), written by the main window, through the `storage` event; notes older than 2 minutes are ignored. When the face is lost, the measurement starts over and the note disappears, so being away, sitting down or getting up never triggers it.
 - The log shows a `face:` line every 10 s while monitoring, with frames, pitch, iris, EAR, and detected/counted blinks.
 
+## Leaving the sandbox
+
+Without the App Sandbox, WebKit keeps the app's web data (settings, statistics) in `~/Library/WebKit/com.vinlemon.eyeREST/WebsiteData` instead of `~/Library/Containers/com.vinlemon.eyeREST/Data/Library/WebKit/WebsiteData`. On the first launch without the sandbox, the library constructor copies it over, before any web view exists. macOS asks once whether eyeREST may access data from other apps, since the old container counts as another app's data. Data that was already at the new place is kept aside as `WebsiteData.before-migration-<time>`. The container is left as it was, and a marker (`~/Library/Application Support/com.vinlemon.eyeREST/fsaux/migrated`) keeps the copy from running again. The restart helper's files live next to that marker.
+
 ## Debugging
 
 The library writes a line every time it acts to
 
 ```
-~/Library/Containers/com.vinlemon.eyeREST/Data/tmp/fsaux.log
+~/Library/Logs/eyeREST-patch.log
 ```
 
-(capped: at 2 MB it becomes `fsaux.log.old`, replacing the previous one, and a new log starts)
+(capped: at 2 MB it becomes `eyeREST-patch.log.old`, replacing the previous one, and a new log starts)
 
 for example `setLevel(top) TaoWindow … level=25 cb=0x151`, `miniaturize->hide`, `deminiaturize->show`, `orderOut->quit`, `JS auto camera -> FaceTime HD-Kamera`, `JS no face -> showing smile`, `tray menu installed`, `JS auto start`, `JS user stop`, `state running`, `menu exit->quit`, `ghost show (camera request while hidden)` / `ghost hide`, `overlay centered`, `launch: main window kept hidden`, `reopen -> open main window`, `autostart on/off: ok`, `already running (pid N), quitting`, `screen time: N bytes of log, N days from <date>`, `JS face: …`, `JS detection quality …`, `JS camera change -> restarting monitoring with …`, `camera connected/disconnected: <name>`, `JS camera request stuck (waited N s) -> restarting monitoring`, `JS picture frozen (N frames in 10 s) -> restarting monitoring`, `JS camera gone, no other camera available; waiting`, `JS camera delivers no picture (N s) -> restarting monitoring`, `JS camera ended -> restarting monitoring with …`, `JS about closed -> monitoring resumed`, `export <path>: ok`. Each line ends with the window's current level, which is useful for checking the stacking.
 
