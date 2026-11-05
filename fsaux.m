@@ -330,7 +330,7 @@ static void *swizzle(Class c, SEL sel, void *imp) {
 // WKWebView. JS talks back via window.webkit.messageHandlers.fsaux.postMessage
 // ({cmd: 'log', msg} | {cmd: 'state', running} | {cmd: 'ghost', on} | {cmd: 'menu', item} |
 //  {cmd: 'windows'} | {cmd: 'write', name, data} | {cmd: 'screentime'} | {cmd: 'export', name, data} |
-//  {cmd: 'copyview', x, y, w, h}).
+//  {cmd: 'copyview', x, y, w, h} | {cmd: 'relaunch'}).
 
 static NSHashTable<WKWebView *> *webViews;  // weak
 static BOOL monitoringRunning;
@@ -338,6 +338,7 @@ static id fsaux_menuTarget(void);
 static void fsaux_sendScreenTime(void);
 static void fsaux_sendScreenState(void);
 static void fsaux_setAutostart(BOOL on);
+static NSWindow *fsaux_mainWindow(void);
 static void fsaux_sendAutostart(void);
 
 // WebKit only grants camera requests while the page's window is on screen.
@@ -416,6 +417,20 @@ static void fsaux_ghost(NSWindow *w, BOOL on) {
         // {cmd: 'autostart'} reports the state, {cmd: 'autostart', on} changes it.
         if (d[@"on"]) fsaux_setAutostart([d[@"on"] boolValue]);
         fsaux_sendAutostart();
+    } else if ([cmd isEqual:@"relaunch"]) {
+        // Quit and start again (at most every 10 minutes): a shell opens the
+        // app again once this process has ended.
+        NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
+        double last = [ud doubleForKey:@"fsaux-last-relaunch"], now = [NSDate date].timeIntervalSince1970;
+        if (now - last < 600) { fsaux_log(m.webView.window, @"relaunch skipped (last one under 10 minutes ago)"); return; }
+        [ud setDouble:now forKey:@"fsaux-last-relaunch"];
+        [ud synchronize];
+        NSTask *t = [NSTask new];
+        t.executableURL = [NSURL fileURLWithPath:@"/bin/sh"];
+        t.arguments = @[@"-c", [NSString stringWithFormat:@"while kill -0 %d 2>/dev/null; do sleep 0.5; done; sleep 1; /usr/bin/open -b com.vinlemon.eyeREST", getpid()]];
+        NSError *err;
+        if (![t launchAndReturnError:&err]) { fsaux_log(m.webView.window, [NSString stringWithFormat:@"relaunch failed: %@", err]); return; }
+        fsaux_quit(fsaux_mainWindow(), @"relaunch");
     } else if ([cmd isEqual:@"copyview"]) {
         // {cmd: 'copyview', x, y, w, h}: copy that part of the page (CSS px)
         // to the clipboard as an image, exactly as it is shown.

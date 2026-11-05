@@ -113,7 +113,7 @@
     if (ghost) post({ cmd: 'ghost', on: true });
     const req = { at: Date.now() };
     pendingRequests.add(req);
-    try { const s = await getUserMediaInner(c); stuckMs = STUCK_MIN_MS; return s; }
+    try { const s = await getUserMediaInner(c); stuckMs = STUCK_MIN_MS; stuckInARow = 0; return s; }
     catch (e) { log('getUserMedia failed: ' + e); throw e; }
     finally { pendingRequests.delete(req); if (ghost) post({ cmd: 'ghost', on: false }); }
   };
@@ -124,12 +124,16 @@
   // time (12, 24, 48, 60 s) so restarts don't pile up camera requests; the
   // wait goes back to 12 s once a request answers.
   const STUCK_MIN_MS = 12000, STUCK_MAX_MS = 60000;
-  let stuckMs = STUCK_MIN_MS;
+  let stuckMs = STUCK_MIN_MS, stuckInARow = 0;
   workerInterval(() => {
     if (restarting) return;
     const stuck = [...pendingRequests].filter((r) => Date.now() - r.at > stuckMs);
     if (!stuck.length) return;
     for (const r of stuck) pendingRequests.delete(r);  // given up; if one answers later, nothing waits for it
+    // After a long run (seen after a night with sleep), WebKit's web process
+    // can stay suspended so that no camera request gets through; restarting
+    // monitoring doesn't help then, restarting the app does (fsaux.m).
+    if (++stuckInARow >= 3) { stuckInARow = 0; log('camera requests keep hanging -> restarting the app'); post({ cmd: 'relaunch' }); return; }
     restartMonitoring('camera request stuck (waited ' + stuckMs / 1000 + ' s)');
     stuckMs = Math.min(2 * stuckMs, STUCK_MAX_MS);
   }, 3000);
